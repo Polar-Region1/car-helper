@@ -7,3 +7,8 @@ __pycache__/
 session_id.json
 sessions/
 output/
+.coverage
+htmlcov/
+*.egg-info/
+dist/
+build/
