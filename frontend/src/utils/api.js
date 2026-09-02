@@ -28,6 +28,7 @@ export async function sendChatMessage(message, sessionId, onChunk) {
   const reader = response.body.getReader()
   const decoder = new TextDecoder()
   let buffer = ''
+  let currentEvent = 'message'
 
   while (true) {
     const { done, value } = await reader.read()
@@ -38,11 +39,13 @@ export async function sendChatMessage(message, sessionId, onChunk) {
     buffer = lines.pop() || '' // 保留不完整的行
 
     for (const line of lines) {
+      // 解析事件类型
       if (line.startsWith('event: ')) {
-        const eventType = line.slice(7).trim()
+        currentEvent = line.slice(7).trim()
         continue
       }
 
+      // 解析数据
       if (line.startsWith('data: ')) {
         const data = line.slice(6).trim()
 
@@ -53,40 +56,45 @@ export async function sendChatMessage(message, sessionId, onChunk) {
         try {
           const parsed = JSON.parse(data)
 
-          // 处理推理内容
-          if (parsed.text && line.includes('reasoning')) {
+          // 根据事件类型处理数据
+          if (currentEvent === 'reasoning' && parsed.text) {
             onChunk({
               type: 'reasoning_content',
               content: parsed.text
             })
           }
-          // 处理普通内容
-          else if (parsed.text) {
+          else if (currentEvent === 'content' && parsed.text) {
             onChunk({
               type: 'content',
               content: parsed.text
             })
           }
-          // 处理结构化车型数据
-          else if (parsed.cars) {
+          else if (currentEvent === 'cars_data' && parsed.cars) {
             onChunk({
               type: 'cars_data',
               cars: parsed.cars
             })
           }
-          // 处理工具调用
-          else if (parsed.tool_name) {
+          else if (currentEvent === 'tool_start' && parsed.tool_name) {
             onChunk({
-              type: 'tool',
+              type: 'tool_start',
+              tool_name: parsed.tool_name
+            })
+          }
+          else if (currentEvent === 'tool_end' && parsed.tool_name) {
+            onChunk({
+              type: 'tool_end',
               tool_name: parsed.tool_name,
               result: parsed.result
             })
           }
-          // 处理错误
-          else if (parsed.error) {
-            throw new Error(parsed.error)
+          else if (currentEvent === 'error' && parsed.message) {
+            throw new Error(parsed.message)
           }
         } catch (e) {
+          if (e.message && e.message.startsWith('服务')) {
+            throw e
+          }
           console.warn('Failed to parse SSE data:', data, e)
         }
       }

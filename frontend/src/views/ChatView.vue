@@ -1,7 +1,7 @@
 <template>
   <div class="car-hub" :class="{ 'dark-mode': isDark }">
     <!-- Hero区域 -->
-    <section class="hero-section">
+    <section class="hero-section" v-show="!hasResults">
       <div class="hero-overlay"></div>
       <div class="hero-content">
         <h1 class="hero-title">
@@ -17,9 +17,10 @@
             @keydown.enter="handleSearch"
             placeholder="说说你的需求，比如：20万左右的新能源SUV"
             class="hero-input"
+            :disabled="isLoading"
           />
-          <button @click="handleSearch" class="hero-button">
-            <span class="button-text">立即搜索</span>
+          <button @click="handleSearch" class="hero-button" :disabled="isLoading">
+            <span class="button-text">{{ isLoading ? '搜索中...' : '立即搜索' }}</span>
             <span class="button-icon">→</span>
           </button>
         </div>
@@ -31,29 +32,47 @@
             :key="tag.id"
             @click="quickFilter(tag.query)"
             class="filter-tag"
+            :disabled="isLoading"
           >
             {{ tag.label }}
           </button>
         </div>
+
+        <!-- 历史会话 -->
+        <div class="history-section" v-if="sessions.length > 0">
+          <h3 class="history-title">最近会话</h3>
+          <div class="session-list">
+            <div
+              v-for="session in sessions.slice(0, 5)"
+              :key="session.id"
+              @click="resumeSession(session.id)"
+              class="session-item"
+            >
+              <div class="session-query">{{ session.last_query || '(无标题)' }}</div>
+              <div class="session-time">{{ formatTime(session.update_time) }}</div>
+            </div>
+          </div>
+        </div>
       </div>
 
       <!-- 滚动提示 -->
-      <div class="scroll-indicator">
+      <div class="scroll-indicator" v-if="!isLoading">
         <div class="scroll-arrow">↓</div>
       </div>
     </section>
 
     <!-- 结果展示区域 -->
-    <section class="results-section" v-if="hasResults">
+    <section class="results-section" v-if="hasResults" ref="resultsArea">
       <div class="container">
         <!-- 查询信息栏 -->
         <div class="query-info">
           <div class="query-left">
+            <button @click="resetSearch" class="back-btn">← 返回</button>
             <span class="query-label">当前搜索：</span>
             <span class="query-text">{{ currentQuery }}</span>
           </div>
           <div class="query-right">
-            <button class="icon-btn" @click="toggleView">
+            <button class="icon-btn" @click="toggleView" v-if="displayCars.length > 0">
               <span v-if="viewMode === 'grid'">☷</span>
               <span v-else>⊞</span>
             </button>
@@ -61,34 +80,37 @@
         </div>
 
         <!-- AI分析面板 -->
-        <div class="ai-analysis" v-if="aiAnalysis">
+        <div class="ai-analysis" v-if="aiAnalysis || isLoading">
           <div class="analysis-header">
             <div class="ai-badge">
               <span class="ai-icon">✨</span>
               <span>AI分析</span>
             </div>
-            <button @click="showThinking = !showThinking" class="toggle-btn">
-              {{ showThinking ? '收起' : '展开' }}
+            <button @click="showThinking = !showThinking" class="toggle-btn" v-if="thinkingProcess">
+              {{ showThinking ? '收起思考' : '展开思考' }}
             </button>
-          </div>
-
-          <div class="analysis-content" v-show="!showThinking">
-            <div class="analysis-text" v-html="formatText(aiAnalysis)"></div>
           </div>
 
           <div class="thinking-process" v-show="showThinking" v-if="thinkingProcess">
             <div class="thinking-title">💭 思考过程</div>
             <div class="thinking-text">{{ thinkingProcess }}</div>
           </div>
+
+          <div class="analysis-content">
+            <div class="analysis-text" v-html="formatText(aiAnalysis)"></div>
+            <div v-if="isLoading && !aiAnalysis" class="typing-indicator">
+              <span></span><span></span><span></span>
+            </div>
+          </div>
         </div>
 
         <!-- 车型卡片网格 -->
-        <div class="cars-grid" :class="viewMode">
+        <div class="cars-grid" :class="viewMode" v-if="displayCars.length > 0">
           <div
             v-for="(car, index) in displayCars"
             :key="index"
             class="car-card"
-            :style="{ animationDelay: `${index * 0.1}s` }"
+            :style="{ animationDelay: `${index * 0.05}s` }"
           >
             <div class="card-image">
               <div class="image-placeholder">
@@ -122,25 +144,8 @@
             </div>
           </div>
         </div>
-
-        <!-- 加载更多 -->
-        <div class="load-more" v-if="hasMore">
-          <button @click="loadMore" class="load-more-btn">
-            加载更多车型
-          </button>
-        </div>
       </div>
     </section>
-
-    <!-- 加载状态 -->
-    <div class="loading-overlay" v-if="isLoading">
-      <div class="loading-spinner">
-        <div class="spinner-ring"></div>
-        <div class="spinner-ring"></div>
-        <div class="spinner-ring"></div>
-      </div>
-      <div class="loading-text">正在为您查询最合适的车型...</div>
-    </div>
 
     <!-- 深色模式切换 -->
     <button class="theme-toggle" @click="toggleTheme">
@@ -151,8 +156,9 @@
 </template>
 
 <script>
-import { ref, computed } from 'vue'
-import { sendChatMessage } from '@/utils/api'
+import { ref, computed, onMounted, nextTick } from 'vue'
+import { sendChatMessage, getSessionHistory } from '@/utils/api'
+import { marked } from 'marked'
 
 export default {
   name: 'ChatView',
@@ -166,7 +172,23 @@ export default {
     const isLoading = ref(false)
     const viewMode = ref('grid')
     const displayCars = ref([])
-    const sessionId = ref(`session_${Date.now()}`)
+    const resultsArea = ref(null)
+    const sessions = ref([])
+
+    // 从localStorage恢复session_id或创建新的
+    let sessionId = ref(localStorage.getItem('current_session_id'))
+    if (!sessionId.value) {
+      sessionId.value = `session_${Date.now()}`
+      localStorage.setItem('current_session_id', sessionId.value)
+    }
+
+    // 配置marked
+    marked.setOptions({
+      breaks: true,
+      gfm: true,
+      headerIds: false,
+      mangle: false
+    })
 
     const quickTags = [
       { id: 1, label: '10-20万新能源', query: '推荐10-20万新能源车' },
@@ -175,13 +197,32 @@ export default {
       { id: 4, label: '混动车型', query: '有哪些混动车型' },
     ]
 
-    const hasResults = computed(() => displayCars.value.length > 0 || aiAnalysis.value)
-    const hasMore = ref(false)
+    const hasResults = computed(() => displayCars.value.length > 0 || aiAnalysis.value || isLoading.value)
 
     const formatText = (text) => {
-      return text
-        .replace(/\n/g, '<br>')
-        .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+      if (!text) return ''
+      try {
+        return marked.parse(text)
+      } catch (e) {
+        console.error('Markdown parse error:', e)
+        return text.replace(/\n/g, '<br>')
+      }
+    }
+
+    const formatTime = (timeStr) => {
+      if (!timeStr) return ''
+      try {
+        const date = new Date(timeStr)
+        const now = new Date()
+        const diff = Math.floor((now - date) / 1000)
+
+        if (diff < 60) return '刚刚'
+        if (diff < 3600) return `${Math.floor(diff / 60)}分钟前`
+        if (diff < 86400) return `${Math.floor(diff / 3600)}小时前`
+        return `${Math.floor(diff / 86400)}天前`
+      } catch (e) {
+        return timeStr
+      }
     }
 
     const toggleTheme = () => {
@@ -197,6 +238,24 @@ export default {
       handleSearch()
     }
 
+    const scrollToBottom = () => {
+      nextTick(() => {
+        if (resultsArea.value) {
+          resultsArea.value.scrollTop = resultsArea.value.scrollHeight
+        }
+      })
+    }
+
+    const resetSearch = () => {
+      currentQuery.value = ''
+      aiAnalysis.value = ''
+      thinkingProcess.value = ''
+      displayCars.value = []
+      showThinking.value = false
+      isLoading.value = false
+      searchQuery.value = ''
+    }
+
     const handleSearch = async () => {
       if (!searchQuery.value.trim() || isLoading.value) return
 
@@ -205,6 +264,10 @@ export default {
       aiAnalysis.value = ''
       thinkingProcess.value = ''
       displayCars.value = []
+      showThinking.value = false
+
+      // 滚动到结果区域
+      setTimeout(scrollToBottom, 100)
 
       try {
         await sendChatMessage(
@@ -215,24 +278,52 @@ export default {
               thinkingProcess.value += chunk.content
             } else if (chunk.type === 'content') {
               aiAnalysis.value += chunk.content
+              scrollToBottom()
             } else if (chunk.type === 'cars_data') {
-              // 接收到结构化车型数据
               displayCars.value = chunk.cars
+              scrollToBottom()
             }
           }
         )
 
+        // 查询完成后刷新会话列表
+        loadSessions()
+
       } catch (error) {
         console.error('搜索失败:', error)
-        aiAnalysis.value = '抱歉，查询出错了，请稍后重试。'
+        aiAnalysis.value = `抱歉，查询出错了：${error.message}`
       } finally {
         isLoading.value = false
+        scrollToBottom()
       }
     }
 
-    const loadMore = () => {
-      // TODO: 加载更多逻辑
+    const loadSessions = async () => {
+      try {
+        const response = await fetch('/api/sessions')
+        const data = await response.json()
+        sessions.value = data.sessions || []
+      } catch (e) {
+        console.error('加载会话失败:', e)
+      }
     }
+
+    const resumeSession = (sid) => {
+      sessionId.value = sid
+      localStorage.setItem('current_session_id', sid)
+
+      // 找到会话的最后一个查询
+      const session = sessions.value.find(s => s.id === sid)
+      if (session && session.last_query) {
+        searchQuery.value = session.last_query
+        handleSearch()
+      }
+    }
+
+    // 组件挂载时加载会话列表
+    onMounted(() => {
+      loadSessions()
+    })
 
     return {
       isDark,
@@ -246,13 +337,16 @@ export default {
       displayCars,
       quickTags,
       hasResults,
-      hasMore,
+      resultsArea,
+      sessions,
       formatText,
+      formatTime,
       toggleTheme,
       toggleView,
       quickFilter,
       handleSearch,
-      loadMore
+      resetSearch,
+      resumeSession
     }
   }
 }
@@ -361,6 +455,11 @@ export default {
   background: rgba(255,255,255,0.15);
 }
 
+.hero-input:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .hero-button {
   padding: 1.2rem 2.5rem;
   background: white;
@@ -376,9 +475,14 @@ export default {
   transition: all 0.3s;
 }
 
-.hero-button:hover {
+.hero-button:hover:not(:disabled) {
   transform: translateY(-2px);
   box-shadow: 0 8px 24px rgba(0,0,0,0.2);
+}
+
+.hero-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .button-icon {
@@ -386,7 +490,7 @@ export default {
   transition: transform 0.3s;
 }
 
-.hero-button:hover .button-icon {
+.hero-button:hover:not(:disabled) .button-icon {
   transform: translateX(4px);
 }
 
@@ -396,6 +500,7 @@ export default {
   justify-content: center;
   flex-wrap: wrap;
   animation: fadeInUp 0.8s ease-out 0.6s both;
+  margin-bottom: 2rem;
 }
 
 .filter-tag {
@@ -410,9 +515,64 @@ export default {
   transition: all 0.3s;
 }
 
-.filter-tag:hover {
+.filter-tag:hover:not(:disabled) {
   background: rgba(255,255,255,0.25);
   transform: translateY(-2px);
+}
+
+.filter-tag:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* 历史会话 */
+.history-section {
+  margin-top: 3rem;
+  animation: fadeInUp 0.8s ease-out 0.8s both;
+}
+
+.history-title {
+  color: white;
+  font-size: 1.2rem;
+  margin-bottom: 1rem;
+  opacity: 0.9;
+}
+
+.session-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+  max-width: 600px;
+  margin: 0 auto;
+}
+
+.session-item {
+  background: rgba(255,255,255,0.1);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255,255,255,0.2);
+  border-radius: 12px;
+  padding: 1rem 1.5rem;
+  cursor: pointer;
+  transition: all 0.3s;
+}
+
+.session-item:hover {
+  background: rgba(255,255,255,0.2);
+  transform: translateX(4px);
+}
+
+.session-query {
+  color: white;
+  font-weight: 500;
+  margin-bottom: 0.3rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-time {
+  color: rgba(255,255,255,0.6);
+  font-size: 0.85rem;
 }
 
 .scroll-indicator {
@@ -438,7 +598,8 @@ export default {
 .results-section {
   background: #f8f9fa;
   min-height: 100vh;
-  padding: 4rem 0;
+  padding: 2rem 0;
+  overflow-y: auto;
 }
 
 .dark-mode .results-section {
@@ -467,14 +628,39 @@ export default {
   color: white;
 }
 
+.query-left {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex: 1;
+}
+
+.back-btn {
+  padding: 0.5rem 1rem;
+  background: #f0f0f0;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  font-weight: 500;
+  transition: all 0.3s;
+}
+
+.back-btn:hover {
+  background: #e0e0e0;
+  transform: translateX(-2px);
+}
+
 .query-label {
   color: #888;
-  margin-right: 0.5rem;
 }
 
 .query-text {
   font-weight: 600;
   color: #667eea;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .icon-btn {
@@ -541,6 +727,7 @@ export default {
   color: white;
   cursor: pointer;
   transition: all 0.3s;
+  font-size: 0.9rem;
 }
 
 .toggle-btn:hover {
@@ -550,13 +737,78 @@ export default {
 .analysis-content {
   line-height: 1.8;
   font-size: 1.05rem;
+  min-height: 2rem;
+}
+
+.analysis-text {
+  word-wrap: break-word;
+}
+
+.analysis-text :deep(h1),
+.analysis-text :deep(h2),
+.analysis-text :deep(h3) {
+  margin-top: 1.5rem;
+  margin-bottom: 0.8rem;
+}
+
+.analysis-text :deep(h2) {
+  font-size: 1.3rem;
+  border-bottom: 1px solid rgba(255,255,255,0.3);
+  padding-bottom: 0.5rem;
+}
+
+.analysis-text :deep(table) {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1rem 0;
+  background: rgba(255,255,255,0.1);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.analysis-text :deep(th),
+.analysis-text :deep(td) {
+  padding: 0.8rem;
+  border: 1px solid rgba(255,255,255,0.2);
+  text-align: left;
+}
+
+.analysis-text :deep(th) {
+  background: rgba(255,255,255,0.15);
+  font-weight: 600;
+}
+
+.analysis-text :deep(ul),
+.analysis-text :deep(ol) {
+  margin: 1rem 0;
+  padding-left: 2rem;
+}
+
+.analysis-text :deep(li) {
+  margin: 0.5rem 0;
+}
+
+.analysis-text :deep(code) {
+  background: rgba(0,0,0,0.2);
+  padding: 0.2rem 0.4rem;
+  border-radius: 4px;
+  font-family: monospace;
+}
+
+.analysis-text :deep(pre) {
+  background: rgba(0,0,0,0.2);
+  padding: 1rem;
+  border-radius: 8px;
+  overflow-x: auto;
+  margin: 1rem 0;
 }
 
 .thinking-process {
-  margin-top: 1rem;
+  margin-bottom: 1.5rem;
   padding: 1rem;
   background: rgba(0,0,0,0.2);
   border-radius: 12px;
+  border: 1px solid rgba(255,255,255,0.2);
 }
 
 .thinking-title {
@@ -569,6 +821,34 @@ export default {
   opacity: 0.8;
   font-size: 0.95rem;
   white-space: pre-wrap;
+  line-height: 1.6;
+}
+
+.typing-indicator {
+  display: inline-flex;
+  gap: 4px;
+  padding: 0.5rem 0;
+}
+
+.typing-indicator span {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.8);
+  animation: typing 1.4s infinite;
+}
+
+.typing-indicator span:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.typing-indicator span:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+@keyframes typing {
+  0%, 60%, 100% { opacity: 0.3; transform: scale(0.8); }
+  30% { opacity: 1; transform: scale(1); }
 }
 
 /* 车型卡片网格 */
@@ -730,56 +1010,6 @@ export default {
   background: #e0e0e0;
 }
 
-/* 加载状态 */
-.loading-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0,0,0,0.8);
-  backdrop-filter: blur(10px);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  z-index: 1000;
-}
-
-.loading-spinner {
-  position: relative;
-  width: 100px;
-  height: 100px;
-}
-
-.spinner-ring {
-  position: absolute;
-  inset: 0;
-  border: 4px solid transparent;
-  border-top-color: white;
-  border-radius: 50%;
-  animation: spin 1.5s cubic-bezier(0.5, 0, 0.5, 1) infinite;
-}
-
-.spinner-ring:nth-child(1) {
-  animation-delay: -0.45s;
-}
-
-.spinner-ring:nth-child(2) {
-  animation-delay: -0.3s;
-}
-
-.spinner-ring:nth-child(3) {
-  animation-delay: -0.15s;
-}
-
-@keyframes spin {
-  to { transform: rotate(360deg); }
-}
-
-.loading-text {
-  margin-top: 2rem;
-  color: white;
-  font-size: 1.1rem;
-}
-
 /* 主题切换 */
 .theme-toggle {
   position: fixed;
@@ -799,28 +1029,5 @@ export default {
 
 .theme-toggle:hover {
   transform: scale(1.1) rotate(20deg);
-}
-
-.load-more {
-  text-align: center;
-  padding: 2rem 0;
-}
-
-.load-more-btn {
-  padding: 1rem 3rem;
-  background: #667eea;
-  color: white;
-  border: none;
-  border-radius: 12px;
-  font-size: 1rem;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.3s;
-}
-
-.load-more-btn:hover {
-  background: #5568d3;
-  transform: translateY(-2px);
-  box-shadow: 0 8px 24px rgba(102, 126, 234, 0.3);
 }
 </style>
