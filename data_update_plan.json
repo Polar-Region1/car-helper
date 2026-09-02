@@ -1,0 +1,23 @@
+{
+  "generated_at": "2026-09-02T15:52:12.738244",
+  "data_fresh": false,
+  "missing_price_count": 100,
+  "need_new_models": true,
+  "tasks": [
+    {
+      "priority": "HIGH",
+      "task": "爬取最新车型数据",
+      "description": "数据不够新鲜，需要获取最新上市车型"
+    },
+    {
+      "priority": "MEDIUM",
+      "task": "补充 100 款车型的价格信息",
+      "description": "部分车型缺失价格，影响查询效果"
+    },
+    {
+      "priority": "HIGH",
+      "task": "补充当前年份车型",
+      "description": "2026年车型数据不足"
+    }
+  ]
+}
