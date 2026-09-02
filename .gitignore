@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+.env
+.pytest_cache/
+.idea/
+*.log
+session_id.json
+sessions/
+output/
