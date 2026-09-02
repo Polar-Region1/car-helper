@@ -215,16 +215,12 @@ export default {
               thinkingProcess.value += chunk.content
             } else if (chunk.type === 'content') {
               aiAnalysis.value += chunk.content
+            } else if (chunk.type === 'cars_data') {
+              // 接收到结构化车型数据
+              displayCars.value = chunk.cars
             }
           }
         )
-
-        // 模拟提取车型数据（实际应该从AI响应中解析）
-        displayCars.value = [
-          { name: '比亚迪海豹', energy: '纯电动', level: '中型车', price: '18.98-28.68万', badge: '热门' },
-          { name: '特斯拉Model 3', energy: '纯电动', level: '中型车', price: '25.99-33.99万', badge: '推荐' },
-          { name: '问界M5', energy: '增程式', level: 'SUV', price: '24.98-31.98万' },
-        ]
 
       } catch (error) {
         console.error('搜索失败:', error)

@@ -123,6 +123,48 @@ def _sse(data: dict, event: str = "message") -> str:
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
+def _extract_cars_from_result(result_str: str) -> list:
+    """从工具返回结果中提取车型数据"""
+    import json
+
+    cars = []
+
+    try:
+        # 尝试直接解析JSON（工具返回的是字典转字符串）
+        result_dict = eval(result_str)  # 或用 ast.literal_eval
+
+        if isinstance(result_dict, dict) and "数据" in result_dict:
+            raw_data = result_dict["数据"]
+
+            for item in raw_data[:20]:  # 最多20个
+                try:
+                    name = f"{item.get('品牌', '')} {item.get('车系', '')} {item.get('车型', '')}".strip()
+                    price = item.get('官方指导价', '暂无报价')
+                    energy = item.get('能源类型', '未知')
+                    level = item.get('级别', '未知')
+
+                    # 简单判断badge
+                    badge = None
+                    if '新能源' in energy or '纯电' in energy:
+                        badge = '新能源'
+
+                    cars.append({
+                        "name": name,
+                        "price": price,
+                        "energy": energy,
+                        "level": level,
+                        "badge": badge
+                    })
+                except Exception as e:
+                    logger.debug(f"Failed to parse car item: {e}")
+                    continue
+
+    except Exception as e:
+        logger.debug(f"Failed to parse result as dict: {e}")
+
+    return cars
+
+
 @app.post("/api/chat")
 async def chat_stream(request: Request):
     body = await request.json()
@@ -174,10 +216,22 @@ async def chat_stream(request: Request):
                             result_str = result
                     except Exception:
                         result_str = str(result)
+
                     yield _sse(
                         {"tool_name": tool_name, "result": result_str},
                         "tool_end",
                     )
+
+                    # 如果是车型查询工具，尝试提取结构化数据
+                    if tool_name in ["query_by_brand", "query_by_price_range", "query_by_energy_type", "query_by_conditions"]:
+                        try:
+                            # 尝试解析工具返回的结果为车型列表
+                            cars_data = _extract_cars_from_result(result_str)
+                            if cars_data:
+                                yield _sse({"cars": cars_data}, "cars_data")
+                        except Exception as e:
+                            logger.debug(f"Failed to extract cars data: {e}")
+
                     await asyncio.sleep(0)
 
                 elif kind == "on_chat_model_stream":

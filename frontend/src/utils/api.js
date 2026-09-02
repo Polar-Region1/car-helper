@@ -27,15 +27,22 @@ export async function sendChatMessage(message, sessionId, onChunk) {
 
   const reader = response.body.getReader()
   const decoder = new TextDecoder()
+  let buffer = ''
 
   while (true) {
     const { done, value } = await reader.read()
     if (done) break
 
-    const chunk = decoder.decode(value)
-    const lines = chunk.split('\n')
+    buffer += decoder.decode(value, { stream: true })
+    const lines = buffer.split('\n')
+    buffer = lines.pop() || '' // 保留不完整的行
 
     for (const line of lines) {
+      if (line.startsWith('event: ')) {
+        const eventType = line.slice(7).trim()
+        continue
+      }
+
       if (line.startsWith('data: ')) {
         const data = line.slice(6).trim()
 
@@ -46,19 +53,38 @@ export async function sendChatMessage(message, sessionId, onChunk) {
         try {
           const parsed = JSON.parse(data)
 
-          // 处理不同类型的事件
-          if (parsed.event === 'reasoning_content') {
+          // 处理推理内容
+          if (parsed.text && line.includes('reasoning')) {
             onChunk({
               type: 'reasoning_content',
-              content: parsed.data
+              content: parsed.text
             })
-          } else if (parsed.event === 'content') {
+          }
+          // 处理普通内容
+          else if (parsed.text) {
             onChunk({
               type: 'content',
-              content: parsed.data
+              content: parsed.text
             })
-          } else if (parsed.event === 'error') {
-            throw new Error(parsed.data)
+          }
+          // 处理结构化车型数据
+          else if (parsed.cars) {
+            onChunk({
+              type: 'cars_data',
+              cars: parsed.cars
+            })
+          }
+          // 处理工具调用
+          else if (parsed.tool_name) {
+            onChunk({
+              type: 'tool',
+              tool_name: parsed.tool_name,
+              result: parsed.result
+            })
+          }
+          // 处理错误
+          else if (parsed.error) {
+            throw new Error(parsed.error)
           }
         } catch (e) {
           console.warn('Failed to parse SSE data:', data, e)
