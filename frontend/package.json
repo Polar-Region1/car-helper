@@ -1,0 +1,21 @@
+{
+  "name": "car-helper-frontend",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Car Helper 前端界面",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "keywords": ["vue", "car", "recommendation"],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@vitejs/plugin-vue": "^6.0.8",
+    "axios": "^1.20.0",
+    "echarts": "^6.1.0",
+    "vite": "^8.2.2",
+    "vue": "^3.5.42"
+  }
+}
