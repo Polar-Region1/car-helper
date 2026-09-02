@@ -1,0 +1,176 @@
+"""
+FastAPI SSE 并发压测 - 改进版
+测试不同并发级别下的系统性能
+"""
+import asyncio
+import aiohttp
+import time
+from typing import List, Dict
+import statistics
+import json
+
+
+async def send_message(session: aiohttp.ClientSession, user_id: int, message: str) -> Dict:
+    """模拟单个用户发送消息"""
+    url = "http://localhost:7860/api/chat"
+
+    start_time = time.perf_counter()
+    success = False
+    error_msg = None
+    chunks_received = 0
+
+    try:
+        async with session.post(
+            url,
+            json={"message": message, "session_id": f"load_test_user_{user_id}"},
+            timeout=aiohttp.ClientTimeout(total=120)  # 增加超时时间
+        ) as response:
+            if response.status == 200:
+                async for line in response.content:
+                    if line:
+                        chunks_received += 1
+                success = True
+            else:
+                error_msg = f"HTTP {response.status}"
+    except asyncio.TimeoutError:
+        error_msg = "Timeout"
+    except Exception as e:
+        error_msg = str(e)
+
+    elapsed = time.perf_counter() - start_time
+
+    return {
+        'user_id': user_id,
+        'success': success,
+        'elapsed': elapsed,
+        'chunks': chunks_received,
+        'error': error_msg
+    }
+
+
+async def run_concurrent_test(num_users: int, message: str):
+    """运行并发测试"""
+    print(f"\n{'='*60}")
+    print(f"并发压测: {num_users} 用户")
+    print(f"测试消息: {message}")
+    print(f"{'='*60}\n")
+
+    async with aiohttp.ClientSession() as session:
+        tasks = [
+            send_message(session, i, message)
+            for i in range(num_users)
+        ]
+
+        start_time = time.perf_counter()
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        total_time = time.perf_counter() - start_time
+
+    # 过滤异常
+    valid_results = [r for r in results if isinstance(r, dict)]
+
+    # 统计结果
+    success_count = sum(1 for r in valid_results if r['success'])
+    failed_count = num_users - success_count
+    success_rate = (success_count / num_users) * 100 if num_users > 0 else 0
+
+    response_times = [r['elapsed'] for r in valid_results if r['success']]
+
+    if response_times:
+        response_times.sort()
+        avg_time = statistics.mean(response_times)
+        p50 = statistics.median(response_times)
+        p95 = response_times[int(len(response_times) * 0.95)] if len(response_times) > 1 else response_times[0]
+        p99 = response_times[int(len(response_times) * 0.99)] if len(response_times) > 1 else response_times[0]
+        min_time = min(response_times)
+        max_time = max(response_times)
+    else:
+        avg_time = p50 = p95 = p99 = min_time = max_time = 0
+
+    print(f"总耗时: {total_time:.2f}s")
+    print(f"成功请求: {success_count}/{num_users} ({success_rate:.1f}%)")
+    print(f"失败请求: {failed_count}")
+
+    if success_count > 0:
+        print(f"\n响应时间统计:")
+        print(f"  最小: {min_time:.2f}s")
+        print(f"  平均: {avg_time:.2f}s")
+        print(f"  P50: {p50:.2f}s")
+        print(f"  P95: {p95:.2f}s")
+        print(f"  P99: {p99:.2f}s")
+        print(f"  最大: {max_time:.2f}s")
+
+        # 计算QPS
+        qps = success_count / total_time if total_time > 0 else 0
+        print(f"\nQPS (每秒查询数): {qps:.2f}")
+
+    if failed_count > 0:
+        print(f"\n失败原因:")
+        errors = {}
+        for r in valid_results:
+            if not r['success'] and r['error']:
+                errors[r['error']] = errors.get(r['error'], 0) + 1
+        for error, count in errors.items():
+            print(f"  {error}: {count}次")
+
+    return {
+        'num_users': num_users,
+        'success_rate': success_rate,
+        'total_time': round(total_time, 2),
+        'avg_response_time': round(avg_time, 2),
+        'p50': round(p50, 2),
+        'p95': round(p95, 2),
+        'p99': round(p99, 2),
+        'qps': round(qps, 2) if success_count > 0 else 0,
+    }
+
+
+async def main():
+    """主测试流程"""
+    print("\n" + "="*60)
+    print("FastAPI SSE 并发压测")
+    print("="*60)
+
+    # 测试配置（从小到大）
+    test_configs = [
+        {'users': 3, 'message': '推荐一款10-20万的新能源车'},
+        {'users': 5, 'message': '比亚迪有哪些纯电动车？'},
+        {'users': 10, 'message': '对比几款热门SUV'},
+        {'users': 15, 'message': '推荐一款新能源SUV'},
+    ]
+
+    results = []
+
+    for i, config in enumerate(test_configs):
+        print(f"\n第 {i+1}/{len(test_configs)} 轮测试")
+        result = await run_concurrent_test(config['users'], config['message'])
+        results.append(result)
+
+        # 测试间隔，让系统恢复
+        if i < len(test_configs) - 1:
+            print(f"\n等待10秒后进行下一轮测试...")
+            await asyncio.sleep(10)
+
+    # 汇总报告
+    print("\n" + "="*60)
+    print("压测汇总报告")
+    print("="*60)
+    print(f"{'并发数':>8} {'成功率':>10} {'总耗时':>10} {'平均响应':>10} {'P95':>8} {'QPS':>8}")
+    print("-"*60)
+
+    for r in results:
+        print(f"{r['num_users']:>8} {r['success_rate']:>9.1f}% {r['total_time']:>9.1f}s {r['avg_response_time']:>9.1f}s {r['p95']:>7.1f}s {r['qps']:>7.1f}")
+
+    print("="*60)
+
+    # 保存结果
+    with open('load_test_results.json', 'w', encoding='utf-8') as f:
+        json.dump(results, f, ensure_ascii=False, indent=2)
+    print("\n测试结果已保存到 load_test_results.json")
+
+
+if __name__ == '__main__':
+    print("\n请确保 FastAPI 服务已启动 (python -m src.api)")
+    print("按 Enter 开始测试...\n")
+    input()
+
+    asyncio.run(main())
