@@ -161,8 +161,15 @@ export function SearchInterface() {
       }
     }
 
-    // 如果没有缓存，不要重新查询，只是提示用户
-    console.warn('No cache found for session:', sid)
+    // 如果没有缓存，重新查询（但用新的session_id）
+    localStorage.setItem('current_session_id', sid)
+    const session = sessions.find(s => s.id === sid)
+    if (session && session.last_query) {
+      setSearchQuery(session.last_query)
+      // 不直接调用handleSearch，而是设置查询让用户看到
+      // 或者可以自动触发
+      handleSearch(session.last_query)
+    }
   }
 
   if (hasResults) {
