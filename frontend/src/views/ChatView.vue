@@ -1,240 +1,166 @@
 <template>
-  <div class="car-finder">
-    <!-- Hero区域 - 展厅风格 -->
-    <section class="hero-showroom" v-show="!hasResults">
-      <div class="hero-container">
-        <!-- 主标题区 -->
-        <div class="title-block">
-          <div class="title-line">
-            <span class="title-number">40,912</span>
-            <span class="title-text">款车型</span>
-          </div>
-          <h1 class="main-title">
-            FIND YOUR
-            <span class="title-highlight">PERFECT</span>
-            CAR
-          </h1>
-          <p class="subtitle">AI驱动的智能选车系统 · 精准匹配您的需求</p>
-        </div>
+  <div class="search-interface">
+    <!-- Hero区域 - 极简 -->
+    <section class="hero" v-show="!hasResults">
+      <div class="container">
+        <div class="hero-content">
+          <!-- 标题 -->
+          <h1 class="hero-title">Find Your Car</h1>
+          <p class="hero-subtitle">AI-powered intelligent search system</p>
 
-        <!-- 搜索框 - 简约大气 -->
-        <div class="search-container">
-          <div class="search-wrapper">
+          <!-- 搜索框 -->
+          <div class="search-box">
             <input
               v-model="searchQuery"
               @keydown.enter="handleSearch"
-              placeholder="描述您的需求，例如：预算20万，新能源SUV，适合家用"
+              placeholder="Describe your needs, e.g., 10-20万 new energy SUV"
               class="search-input"
               :disabled="isLoading"
             />
-            <button @click="handleSearch" class="search-submit" :disabled="isLoading">
-              <span v-if="!isLoading">搜索</span>
-              <span v-else class="loading-spinner"></span>
+            <button @click="handleSearch" class="search-button" :disabled="isLoading || !searchQuery.trim()">
+              {{ isLoading ? 'Searching...' : 'Search' }}
             </button>
           </div>
 
-          <!-- 快捷标签 - 扁平化设计 -->
-          <div class="quick-tags">
+          <!-- 快速标签 -->
+          <div class="tags">
             <button
               v-for="tag in quickTags"
               :key="tag.id"
               @click="quickFilter(tag.query)"
-              class="tag-btn"
+              class="tag"
               :disabled="isLoading"
             >
               {{ tag.label }}
             </button>
           </div>
-        </div>
 
-        <!-- 历史会话 - 卡片式 -->
-        <div class="history-panel" v-if="sessions.length > 0">
-          <div class="panel-header">
-            <span class="panel-title">最近搜索</span>
-            <span class="panel-count">{{ sessions.length }}</span>
-          </div>
-          <div class="session-grid">
-            <div
-              v-for="(session, idx) in sessions.slice(0, 6)"
-              :key="session.id"
-              @click="resumeSession(session.id)"
-              class="session-card"
-              :style="{ animationDelay: `${idx * 0.1}s` }"
-            >
-              <div class="session-index">{{ String(idx + 1).padStart(2, '0') }}</div>
-              <div class="session-content">
-                <div class="session-query">{{ session.last_query || '(无标题)' }}</div>
-                <div class="session-meta">{{ formatTime(session.update_time) }}</div>
-              </div>
+          <!-- 历史会话 -->
+          <div class="history" v-if="sessions.length > 0">
+            <h2 class="history-title">Recent Searches</h2>
+            <div class="history-grid">
+              <button
+                v-for="(session, idx) in sessions.slice(0, 6)"
+                :key="session.id"
+                @click="resumeSession(session.id)"
+                class="history-item"
+              >
+                <span class="history-number">{{ String(idx + 1).padStart(2, '0') }}</span>
+                <span class="history-query">{{ session.last_query || '(Untitled)' }}</span>
+                <span class="history-time">{{ formatTime(session.update_time) }}</span>
+              </button>
             </div>
           </div>
         </div>
-      </div>
-
-      <!-- 装饰元素 -->
-      <div class="hero-decoration">
-        <div class="deco-line deco-line-1"></div>
-        <div class="deco-line deco-line-2"></div>
       </div>
     </section>
 
-    <!-- 结果区域 - 画廊风格 -->
-    <section class="results-gallery" v-if="hasResults">
-      <div class="gallery-container">
-        <!-- 顶部操作栏 -->
-        <div class="gallery-header">
-          <button @click="resetSearch" class="back-button">
-            <span class="back-arrow">←</span>
-            <span class="back-text">返回搜索</span>
-          </button>
+    <!-- 结果区域 -->
+    <section class="results" v-if="hasResults">
+      <div class="container">
+        <!-- 返回按钮 -->
+        <button @click="resetSearch" class="back-button">
+          ← Back to Search
+        </button>
 
-          <div class="header-info">
-            <span class="query-badge">{{ currentQuery }}</span>
-            <div class="view-controls" v-if="displayCars.length > 0">
-              <button
-                @click="viewMode = 'grid'"
-                class="view-btn"
-                :class="{ active: viewMode === 'grid' }"
-              >
-                网格
-              </button>
-              <button
-                @click="viewMode = 'list'"
-                class="view-btn"
-                :class="{ active: viewMode === 'list' }"
-              >
-                列表
-              </button>
+        <!-- AI分析 -->
+        <div class="analysis" v-if="aiAnalysis || isLoading">
+          <div class="analysis-header">
+            <h2 class="analysis-title">Analysis</h2>
+            <button
+              v-if="thinkingProcess"
+              @click="showThinking = !showThinking"
+              class="toggle-button"
+            >
+              {{ showThinking ? 'Hide Process' : 'Show Process' }}
+            </button>
+          </div>
+
+          <!-- 思考过程 -->
+          <div class="thinking" v-if="showThinking && thinkingProcess">
+            <h3 class="thinking-title">Reasoning</h3>
+            <pre class="thinking-content">{{ thinkingProcess }}</pre>
+          </div>
+
+          <!-- 分析内容 -->
+          <div class="analysis-content">
+            <div v-html="formatText(aiAnalysis)" class="prose"></div>
+            <div v-if="isLoading && !aiAnalysis" class="loading">
+              <div class="loading-bar"></div>
             </div>
           </div>
         </div>
 
-        <!-- AI分析面板 - 高端设计 -->
-        <div class="analysis-panel" v-if="aiAnalysis || isLoading">
-          <div class="panel-decoration">
-            <div class="deco-bar"></div>
+        <!-- 车型列表 -->
+        <div class="cars" v-if="displayCars.length > 0">
+          <div class="cars-header">
+            <h2 class="cars-title">Results</h2>
+            <span class="cars-count">{{ displayCars.length }} cars</span>
           </div>
 
-          <div class="panel-content">
-            <div class="panel-header-row">
-              <div class="panel-badge">
-                <span class="badge-icon">✦</span>
-                <span class="badge-text">AI 分析报告</span>
-              </div>
-              <button
-                v-if="thinkingProcess"
-                @click="showThinking = !showThinking"
-                class="thinking-toggle"
-              >
-                {{ showThinking ? '隐藏思考过程' : '查看思考过程' }}
-              </button>
-            </div>
-
-            <!-- 思考过程 -->
-            <div class="thinking-section" v-if="showThinking && thinkingProcess">
-              <div class="thinking-header">推理过程</div>
-              <div class="thinking-content">{{ thinkingProcess }}</div>
-            </div>
-
-            <!-- 分析内容 -->
-            <div class="analysis-content">
-              <div class="content-text" v-html="formatText(aiAnalysis)"></div>
-              <div v-if="isLoading && !aiAnalysis" class="loading-dots">
-                <span></span><span></span><span></span>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- 车型展示区 - 豪华卡片 -->
-        <div class="cars-showcase" v-if="displayCars.length > 0">
-          <div class="showcase-header">
-            <h2 class="showcase-title">推荐车型</h2>
-            <div class="showcase-count">{{ displayCars.length }} 款</div>
-          </div>
-
-          <div class="cars-grid" :class="`view-${viewMode}`">
-            <div
+          <div class="cars-grid">
+            <article
               v-for="(car, index) in displayCars"
               :key="index"
               class="car-card"
-              :style="{ animationDelay: `${index * 0.08}s` }"
             >
-              <!-- 车型图片区 -->
-              <div class="card-visual">
-                <div class="visual-placeholder">
-                  <svg class="car-icon" viewBox="0 0 24 24" fill="none">
-                    <path d="M5 13L3 15H6L5 13Z" stroke="currentColor" stroke-width="1.5"/>
-                    <path d="M19 13L21 15H18L19 13Z" stroke="currentColor" stroke-width="1.5"/>
-                    <path d="M5 17H19" stroke="currentColor" stroke-width="1.5"/>
-                    <path d="M6 11L8 6H16L18 11" stroke="currentColor" stroke-width="1.5"/>
-                    <path d="M4 15V11L6 11" stroke="currentColor" stroke-width="1.5"/>
-                    <path d="M20 15V11L18 11" stroke="currentColor" stroke-width="1.5"/>
+              <div class="car-image">
+                <div class="car-placeholder">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1">
+                    <path d="M5 17h14M5 17v-4M5 17l-2 2M19 17v-4M19 17l2 2M7 13V7l2-2h6l2 2v6"/>
+                    <circle cx="8" cy="17" r="1"/>
+                    <circle cx="16" cy="17" r="1"/>
                   </svg>
                 </div>
-                <div class="card-badge" v-if="car.badge">{{ car.badge }}</div>
+                <span v-if="car.badge" class="car-badge">{{ car.badge }}</span>
               </div>
 
-              <!-- 车型信息 -->
-              <div class="card-info">
-                <h3 class="car-title">{{ car.name }}</h3>
+              <div class="car-content">
+                <h3 class="car-name">{{ car.name }}</h3>
 
-                <div class="car-specs">
-                  <div class="spec-item">
-                    <span class="spec-label">能源</span>
-                    <span class="spec-value">{{ car.energy }}</span>
+                <dl class="car-specs">
+                  <div class="spec">
+                    <dt>Energy</dt>
+                    <dd>{{ car.energy }}</dd>
                   </div>
-                  <div class="spec-divider"></div>
-                  <div class="spec-item">
-                    <span class="spec-label">级别</span>
-                    <span class="spec-value">{{ car.level }}</span>
+                  <div class="spec">
+                    <dt>Type</dt>
+                    <dd>{{ car.level }}</dd>
                   </div>
+                </dl>
+
+                <div class="car-price">
+                  <span class="price-label">Price</span>
+                  <span class="price-value">{{ car.price }}</span>
                 </div>
 
-                <div class="car-pricing">
-                  <div class="price-label">指导价</div>
-                  <div class="price-value">{{ car.price }}</div>
-                </div>
-
-                <div class="card-actions">
-                  <button class="action-btn action-primary">
-                    <span>详情</span>
-                  </button>
-                  <button class="action-btn action-secondary">
-                    <span>对比</span>
-                  </button>
+                <div class="car-actions">
+                  <button class="action-button primary">Details</button>
+                  <button class="action-button secondary">Compare</button>
                 </div>
               </div>
-            </div>
+            </article>
           </div>
         </div>
       </div>
     </section>
-
-    <!-- 主题切换按钮 -->
-    <button class="theme-switcher" @click="toggleTheme" title="切换主题">
-      <span v-if="isDark">☀</span>
-      <span v-else>☾</span>
-    </button>
   </div>
 </template>
 
 <script>
-import { ref, computed, onMounted, nextTick } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { sendChatMessage } from '@/utils/api'
 import { marked } from 'marked'
 
 export default {
   name: 'ChatView',
   setup() {
-    const isDark = ref(true) // 默认深色主题
     const searchQuery = ref('')
     const currentQuery = ref('')
     const aiAnalysis = ref('')
     const thinkingProcess = ref('')
     const showThinking = ref(false)
     const isLoading = ref(false)
-    const viewMode = ref('grid')
     const displayCars = ref([])
     const sessions = ref([])
 
@@ -252,10 +178,10 @@ export default {
     })
 
     const quickTags = [
-      { id: 1, label: '10-20万新能源', query: '推荐10-20万新能源车' },
-      { id: 2, label: '比亚迪SUV', query: '比亚迪有哪些SUV' },
-      { id: 3, label: '纯电轿车', query: '推荐纯电动轿车' },
-      { id: 4, label: '混动车型', query: '有哪些混动车型' },
+      { id: 1, label: '10-20万 EV', query: '推荐10-20万新能源车' },
+      { id: 2, label: 'BYD SUV', query: '比亚迪有哪些SUV' },
+      { id: 3, label: 'Pure EV', query: '推荐纯电动轿车' },
+      { id: 4, label: 'Hybrid', query: '有哪些混动车型' },
     ]
 
     const hasResults = computed(() => displayCars.value.length > 0 || aiAnalysis.value || isLoading.value)
@@ -275,17 +201,13 @@ export default {
         const date = new Date(timeStr)
         const now = new Date()
         const diff = Math.floor((now - date) / 1000)
-        if (diff < 60) return '刚刚'
-        if (diff < 3600) return `${Math.floor(diff / 60)}分钟前`
-        if (diff < 86400) return `${Math.floor(diff / 3600)}小时前`
-        return `${Math.floor(diff / 86400)}天前`
+        if (diff < 60) return 'Just now'
+        if (diff < 3600) return `${Math.floor(diff / 60)}m ago`
+        if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`
+        return `${Math.floor(diff / 86400)}d ago`
       } catch (e) {
         return timeStr
       }
-    }
-
-    const toggleTheme = () => {
-      isDark.value = !isDark.value
     }
 
     const quickFilter = (query) => {
@@ -327,9 +249,10 @@ export default {
             }
           }
         )
+
         loadSessions()
 
-        // 缓存查询结果
+        // 缓存结果
         const resultCache = {
           query: currentQuery.value,
           analysis: aiAnalysis.value,
@@ -340,8 +263,8 @@ export default {
         localStorage.setItem(`session_result_${sessionId.value}`, JSON.stringify(resultCache))
 
       } catch (error) {
-        console.error('搜索失败:', error)
-        aiAnalysis.value = `抱歉，查询出错了：${error.message}`
+        console.error('Search failed:', error)
+        aiAnalysis.value = `Error: ${error.message}`
       } finally {
         isLoading.value = false
       }
@@ -353,16 +276,14 @@ export default {
         const data = await response.json()
         sessions.value = data.sessions || []
       } catch (e) {
-        console.error('加载会话失败:', e)
+        console.error('Failed to load sessions:', e)
       }
     }
 
     const resumeSession = async (sid) => {
-      // 检查是否有缓存的结果
       const cachedResult = localStorage.getItem(`session_result_${sid}`)
 
       if (cachedResult) {
-        // 有缓存，直接展示
         try {
           const cached = JSON.parse(cachedResult)
           sessionId.value = sid
@@ -373,15 +294,12 @@ export default {
           thinkingProcess.value = cached.thinking || ''
           displayCars.value = cached.cars || []
 
-          // 不需要重新查询
           return
         } catch (e) {
-          console.error('解析缓存失败:', e)
-          // 缓存损坏，继续正常流程
+          console.error('Failed to parse cache:', e)
         }
       }
 
-      // 没有缓存，重新查询
       sessionId.value = sid
       localStorage.setItem('current_session_id', sid)
       const session = sessions.value.find(s => s.id === sid)
@@ -396,21 +314,18 @@ export default {
     })
 
     return {
-      isDark,
       searchQuery,
       currentQuery,
       aiAnalysis,
       thinkingProcess,
       showThinking,
       isLoading,
-      viewMode,
       displayCars,
       quickTags,
       hasResults,
       sessions,
       formatText,
       formatTime,
-      toggleTheme,
       quickFilter,
       handleSearch,
       resetSearch,
@@ -421,812 +336,497 @@ export default {
 </script>
 
 <style scoped>
-.car-finder {
-  min-height: 100vh;
-  position: relative;
+.search-interface {
+  min-height: calc(100vh - 64px);
 }
 
-/* ========== Hero Showroom ========== */
-.hero-showroom {
-  min-height: calc(100vh - 80px);
+/* Hero区域 */
+.hero {
+  min-height: calc(100vh - 64px);
   display: flex;
   align-items: center;
-  justify-content: center;
-  position: relative;
-  padding: 4rem 2rem;
+  padding: var(--space-xl) 0;
 }
 
-.hero-container {
-  max-width: 1200px;
-  width: 100%;
-  z-index: 2;
+.hero-content {
+  max-width: 720px;
+  margin: 0 auto;
 }
 
-/* 标题区 */
-.title-block {
-  margin-bottom: 4rem;
-  animation: fadeInUp 0.8s ease-out;
+.hero-title {
+  font-size: 48px;
+  font-weight: 900;
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+  margin-bottom: var(--space-sm);
+  color: var(--color-foreground);
 }
 
-.title-line {
-  display: flex;
-  align-items: baseline;
-  gap: 1rem;
-  margin-bottom: 1.5rem;
+.hero-subtitle {
+  font-size: 18px;
+  font-weight: 400;
+  color: var(--color-muted-foreground);
+  margin-bottom: var(--space-lg);
 }
 
-.title-number {
-  font-family: var(--font-display);
-  font-size: 4rem;
-  color: var(--color-accent);
-  line-height: 1;
-  letter-spacing: 0.05em;
-}
-
-.title-text {
-  font-size: 1.2rem;
-  color: var(--color-text-muted);
-  letter-spacing: 0.15em;
-  text-transform: uppercase;
-}
-
-.main-title {
-  font-family: var(--font-display);
-  font-size: 5.5rem;
-  font-weight: 700;
-  line-height: 0.9;
-  letter-spacing: 0.02em;
-  margin-bottom: 1rem;
-  color: var(--color-text);
-}
-
-.title-highlight {
-  display: block;
-  color: var(--color-accent);
-  font-size: 6.5rem;
-  font-style: italic;
-}
-
-.subtitle {
-  font-size: 1.1rem;
-  color: var(--color-text-muted);
-  letter-spacing: 0.05em;
-  font-weight: 300;
-}
-
-/* 搜索容器 */
-.search-container {
-  margin-bottom: 4rem;
-  animation: fadeInUp 0.8s ease-out 0.2s both;
-}
-
-.search-wrapper {
-  display: flex;
+/* 搜索框 */
+.search-box {
+  display: grid;
+  grid-template-columns: 1fr auto;
   gap: 0;
-  margin-bottom: 2rem;
   border: 2px solid var(--color-border);
-  transition: border-color var(--duration-normal);
+  margin-bottom: var(--space-md);
+  transition: border-color var(--duration) var(--easing);
 }
 
-.search-wrapper:focus-within {
-  border-color: var(--color-accent);
+.search-box:focus-within {
+  border-color: var(--color-foreground);
 }
 
 .search-input {
-  flex: 1;
-  padding: 1.5rem 2rem;
-  background: transparent;
+  padding: var(--space-md);
   border: none;
-  color: var(--color-text);
-  font-size: 1.1rem;
-  font-family: var(--font-body);
-  font-weight: 300;
-  letter-spacing: 0.02em;
+  background: transparent;
+  font-family: var(--font-sans);
+  font-size: 16px;
+  color: var(--color-foreground);
+}
+
+.search-input:focus {
   outline: none;
 }
 
 .search-input::placeholder {
-  color: var(--color-text-muted);
+  color: var(--color-muted-foreground);
 }
 
-.search-input:disabled {
-  opacity: 0.5;
-}
-
-.search-submit {
-  padding: 1.5rem 3rem;
-  background: var(--color-accent);
+.search-button {
+  padding: var(--space-md) var(--space-lg);
+  background: var(--color-foreground);
+  color: var(--color-background);
   border: none;
-  color: var(--color-primary);
-  font-family: var(--font-display);
-  font-size: 1.2rem;
-  letter-spacing: 0.1em;
+  font-family: var(--font-sans);
+  font-size: 14px;
+  font-weight: 600;
   cursor: pointer;
-  transition: all var(--duration-normal);
-  position: relative;
-  overflow: hidden;
+  transition: opacity var(--duration) var(--easing);
 }
 
-.search-submit::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: -100%;
-  width: 100%;
-  height: 100%;
-  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.3), transparent);
-  transition: left 0.5s;
+.search-button:hover:not(:disabled) {
+  opacity: 0.8;
 }
 
-.search-submit:hover::before {
-  left: 100%;
+.search-button:active:not(:disabled) {
+  transform: translateY(1px);
 }
 
-.search-submit:hover {
-  background: #e5c158;
-  transform: translateY(-2px);
-  box-shadow: var(--shadow-md);
-}
-
-.search-submit:disabled {
-  opacity: 0.6;
+.search-button:disabled {
+  opacity: 0.5;
   cursor: not-allowed;
 }
 
-.loading-spinner {
-  display: inline-block;
-  width: 20px;
-  height: 20px;
-  border: 2px solid var(--color-primary);
-  border-top-color: transparent;
-  border-radius: 50%;
-  animation: spin 0.8s linear infinite;
-}
-
-@keyframes spin {
-  to { transform: rotate(360deg); }
-}
-
-/* 快捷标签 */
-.quick-tags {
+/* 标签 */
+.tags {
   display: flex;
-  gap: 1rem;
+  gap: var(--space-xs);
   flex-wrap: wrap;
+  margin-bottom: var(--space-lg);
 }
 
-.tag-btn {
-  padding: 0.6rem 1.5rem;
-  background: transparent;
+.tag {
+  padding: var(--space-xs) var(--space-sm);
   border: 1px solid var(--color-border);
-  color: var(--color-text-muted);
-  font-size: 0.9rem;
-  font-weight: 400;
-  letter-spacing: 0.05em;
+  background: transparent;
+  font-family: var(--font-sans);
+  font-size: 14px;
+  color: var(--color-foreground);
   cursor: pointer;
-  transition: all var(--duration-fast);
+  transition: all var(--duration) var(--easing);
 }
 
-.tag-btn:hover:not(:disabled) {
-  border-color: var(--color-accent);
-  color: var(--color-accent);
-  transform: translateY(-2px);
+.tag:hover:not(:disabled) {
+  background: var(--color-foreground);
+  color: var(--color-background);
 }
 
-.tag-btn:disabled {
+.tag:disabled {
   opacity: 0.3;
   cursor: not-allowed;
 }
 
-/* 历史面板 */
-.history-panel {
-  animation: fadeInUp 0.8s ease-out 0.4s both;
+/* 历史记录 */
+.history {
+  margin-top: var(--space-xl);
+  padding-top: var(--space-xl);
+  border-top: 1px solid var(--color-border);
 }
 
-.panel-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 1.5rem;
-  padding-bottom: 0.75rem;
-  border-bottom: 1px solid var(--color-border);
+.history-title {
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  margin-bottom: var(--space-md);
+  color: var(--color-muted-foreground);
 }
 
-.panel-title {
-  font-family: var(--font-display);
-  font-size: 1.5rem;
-  letter-spacing: 0.1em;
-  color: var(--color-text);
-}
-
-.panel-count {
-  font-family: var(--font-display);
-  font-size: 1.2rem;
-  color: var(--color-accent);
-}
-
-.session-grid {
+.history-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  gap: 1rem;
-}
-
-.session-card {
-  display: flex;
-  gap: 1rem;
-  padding: 1.25rem;
-  background: rgba(26, 26, 26, 0.5);
+  gap: 1px;
+  background: var(--color-border);
   border: 1px solid var(--color-border);
+}
+
+.history-item {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: var(--space-sm);
+  align-items: center;
+  padding: var(--space-md);
+  background: var(--color-background);
+  border: none;
+  text-align: left;
+  font-family: var(--font-sans);
   cursor: pointer;
-  transition: all var(--duration-normal);
-  animation: slideInRight 0.6s ease-out both;
+  transition: background var(--duration) var(--easing);
 }
 
-.session-card:hover {
-  border-color: var(--color-accent);
-  transform: translateX(8px);
-  background: rgba(26, 26, 26, 0.8);
+.history-item:hover {
+  background: var(--color-muted);
 }
 
-.session-index {
-  font-family: var(--font-display);
-  font-size: 1.5rem;
-  color: var(--color-accent);
-  flex-shrink: 0;
+.history-number {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-muted-foreground);
 }
 
-.session-content {
-  flex: 1;
-  min-width: 0;
-}
-
-.session-query {
-  color: var(--color-text);
-  font-weight: 500;
-  margin-bottom: 0.5rem;
+.history-query {
+  font-size: 14px;
+  color: var(--color-foreground);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.session-meta {
-  font-size: 0.85rem;
-  color: var(--color-text-muted);
+.history-time {
+  font-size: 12px;
+  color: var(--color-muted-foreground);
 }
 
-/* 装饰元素 */
-.hero-decoration {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  overflow: hidden;
-}
-
-.deco-line {
-  position: absolute;
-  height: 1px;
-  background: linear-gradient(90deg, transparent, var(--color-accent), transparent);
-  opacity: 0.2;
-}
-
-.deco-line-1 {
-  top: 20%;
-  left: 0;
-  right: 0;
-  animation: slideLineRight 3s ease-in-out infinite;
-}
-
-.deco-line-2 {
-  bottom: 30%;
-  left: 0;
-  right: 0;
-  animation: slideLineLeft 3s ease-in-out infinite 1.5s;
-}
-
-@keyframes slideLineRight {
-  0%, 100% { transform: translateX(-100%); }
-  50% { transform: translateX(100%); }
-}
-
-@keyframes slideLineLeft {
-  0%, 100% { transform: translateX(100%); }
-  50% { transform: translateX(-100%); }
-}
-
-/* ========== Results Gallery ========== */
-.results-gallery {
-  min-height: calc(100vh - 80px);
-  padding: 3rem 2rem;
-}
-
-.gallery-container {
-  max-width: 1600px;
-  margin: 0 auto;
-}
-
-/* 顶部操作栏 */
-.gallery-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 3rem;
-  padding-bottom: 1.5rem;
-  border-bottom: 1px solid var(--color-border);
-  animation: fadeInUp 0.6s ease-out;
+/* 结果区域 */
+.results {
+  padding: var(--space-lg) 0;
 }
 
 .back-button {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  padding: 0.75rem 1.5rem;
-  background: transparent;
+  padding: var(--space-sm) var(--space-md);
+  margin-bottom: var(--space-lg);
   border: 1px solid var(--color-border);
-  color: var(--color-text);
-  font-size: 0.95rem;
+  background: transparent;
+  font-family: var(--font-sans);
+  font-size: 14px;
+  color: var(--color-foreground);
   cursor: pointer;
-  transition: all var(--duration-fast);
+  transition: all var(--duration) var(--easing);
 }
 
 .back-button:hover {
-  border-color: var(--color-accent);
-  transform: translateX(-4px);
+  background: var(--color-foreground);
+  color: var(--color-background);
 }
 
-.back-arrow {
-  font-size: 1.2rem;
-}
-
-.header-info {
-  display: flex;
-  align-items: center;
-  gap: 2rem;
-}
-
-.query-badge {
-  padding: 0.5rem 1.5rem;
-  background: rgba(212, 175, 55, 0.1);
-  border: 1px solid var(--color-accent);
-  color: var(--color-accent);
-  font-size: 0.9rem;
-  font-weight: 500;
-  letter-spacing: 0.05em;
-}
-
-.view-controls {
-  display: flex;
-  gap: 0;
+/* AI分析 */
+.analysis {
+  margin-bottom: var(--space-xl);
+  padding: var(--space-lg);
   border: 1px solid var(--color-border);
 }
 
-.view-btn {
-  padding: 0.5rem 1.25rem;
-  background: transparent;
-  border: none;
-  color: var(--color-text-muted);
-  font-size: 0.9rem;
-  cursor: pointer;
-  transition: all var(--duration-fast);
-}
-
-.view-btn:first-child {
-  border-right: 1px solid var(--color-border);
-}
-
-.view-btn.active {
-  background: var(--color-accent);
-  color: var(--color-primary);
-}
-
-/* AI分析面板 */
-.analysis-panel {
-  position: relative;
-  margin-bottom: 4rem;
-  padding: 3rem;
-  background: rgba(26, 26, 26, 0.8);
-  border: 1px solid var(--color-border);
-  animation: slideInRight 0.8s ease-out;
-}
-
-.panel-decoration {
-  position: absolute;
-  top: 0;
-  left: 0;
-  height: 100%;
-  width: 4px;
-  overflow: hidden;
-}
-
-.deco-bar {
-  height: 40%;
-  width: 100%;
-  background: var(--color-accent);
-  animation: slideDecoBar 3s ease-in-out infinite;
-}
-
-@keyframes slideDecoBar {
-  0%, 100% { transform: translateY(-100%); }
-  50% { transform: translateY(250%); }
-}
-
-.panel-header-row {
+.analysis-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 2rem;
+  margin-bottom: var(--space-md);
+  padding-bottom: var(--space-md);
+  border-bottom: 1px solid var(--color-border);
 }
 
-.panel-badge {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
+.analysis-title {
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--color-foreground);
 }
 
-.badge-icon {
-  font-size: 1.5rem;
-  color: var(--color-accent);
-}
-
-.badge-text {
-  font-family: var(--font-display);
-  font-size: 1.3rem;
-  letter-spacing: 0.1em;
-  color: var(--color-text);
-}
-
-.thinking-toggle {
-  padding: 0.5rem 1.25rem;
-  background: transparent;
+.toggle-button {
+  padding: var(--space-xs) var(--space-sm);
   border: 1px solid var(--color-border);
-  color: var(--color-text-muted);
-  font-size: 0.85rem;
+  background: transparent;
+  font-family: var(--font-sans);
+  font-size: 12px;
+  color: var(--color-foreground);
   cursor: pointer;
-  transition: all var(--duration-fast);
+  transition: all var(--duration) var(--easing);
 }
 
-.thinking-toggle:hover {
-  border-color: var(--color-accent);
-  color: var(--color-accent);
+.toggle-button:hover {
+  background: var(--color-muted);
 }
 
-.thinking-section {
-  margin-bottom: 2rem;
-  padding: 1.5rem;
-  background: rgba(10, 10, 10, 0.6);
-  border-left: 2px solid var(--color-accent);
+.thinking {
+  margin-bottom: var(--space-md);
+  padding: var(--space-md);
+  background: var(--color-muted);
 }
 
-.thinking-header {
-  font-family: var(--font-display);
-  font-size: 1.1rem;
-  letter-spacing: 0.1em;
-  color: var(--color-accent);
-  margin-bottom: 1rem;
+.thinking-title {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  margin-bottom: var(--space-sm);
+  color: var(--color-muted-foreground);
 }
 
 .thinking-content {
-  font-size: 0.95rem;
-  line-height: 1.8;
-  color: var(--color-text-muted);
+  font-family: monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--color-foreground);
   white-space: pre-wrap;
 }
 
 .analysis-content {
-  font-size: 1.05rem;
-  line-height: 1.9;
-  color: var(--color-text);
+  font-size: 16px;
+  line-height: 1.6;
 }
 
-.content-text :deep(h2) {
-  font-family: var(--font-display);
-  font-size: 1.8rem;
-  margin: 2rem 0 1rem;
-  color: var(--color-accent);
-  letter-spacing: 0.05em;
+.prose :deep(h2) {
+  font-size: 20px;
+  font-weight: 700;
+  margin: var(--space-md) 0 var(--space-sm);
 }
 
-.content-text :deep(table) {
+.prose :deep(table) {
   width: 100%;
-  margin: 2rem 0;
   border-collapse: collapse;
+  margin: var(--space-md) 0;
 }
 
-.content-text :deep(th),
-.content-text :deep(td) {
-  padding: 0.75rem 1rem;
+.prose :deep(th),
+.prose :deep(td) {
+  padding: var(--space-sm);
   border: 1px solid var(--color-border);
   text-align: left;
 }
 
-.content-text :deep(th) {
-  background: rgba(212, 175, 55, 0.1);
+.prose :deep(th) {
   font-weight: 600;
-  color: var(--color-accent);
+  background: var(--color-muted);
 }
 
-.content-text :deep(ul),
-.content-text :deep(ol) {
-  margin: 1rem 0;
-  padding-left: 2rem;
+.prose :deep(ul),
+.prose :deep(ol) {
+  margin: var(--space-sm) 0;
+  padding-left: var(--space-md);
 }
 
-.content-text :deep(li) {
-  margin: 0.5rem 0;
+.loading {
+  padding: var(--space-md) 0;
 }
 
-.loading-dots {
-  display: flex;
-  gap: 0.5rem;
-  padding: 1rem 0;
+.loading-bar {
+  height: 2px;
+  background: var(--color-foreground);
+  animation: loading 1.5s ease-in-out infinite;
 }
 
-.loading-dots span {
-  width: 8px;
-  height: 8px;
-  background: var(--color-accent);
-  border-radius: 50%;
-  animation: bounce-dot 1.4s infinite;
+@keyframes loading {
+  0%, 100% {
+    transform: translateX(-100%);
+  }
+  50% {
+    transform: translateX(100%);
+  }
 }
 
-.loading-dots span:nth-child(2) {
-  animation-delay: 0.2s;
+/* 车型列表 */
+.cars {
+  margin-top: var(--space-xl);
 }
 
-.loading-dots span:nth-child(3) {
-  animation-delay: 0.4s;
-}
-
-@keyframes bounce-dot {
-  0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
-  30% { transform: translateY(-10px); opacity: 1; }
-}
-
-/* 车型展示 */
-.cars-showcase {
-  animation: fadeInUp 0.8s ease-out 0.2s both;
-}
-
-.showcase-header {
+.cars-header {
   display: flex;
   justify-content: space-between;
   align-items: baseline;
-  margin-bottom: 2rem;
+  margin-bottom: var(--space-md);
+  padding-bottom: var(--space-md);
+  border-bottom: 1px solid var(--color-border);
 }
 
-.showcase-title {
-  font-family: var(--font-display);
-  font-size: 2.5rem;
-  letter-spacing: 0.1em;
-  color: var(--color-text);
+.cars-title {
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--color-foreground);
 }
 
-.showcase-count {
-  font-family: var(--font-display);
-  font-size: 1.5rem;
-  color: var(--color-accent);
+.cars-count {
+  font-size: 14px;
+  color: var(--color-muted-foreground);
 }
 
 .cars-grid {
   display: grid;
-  gap: 2rem;
-}
-
-.cars-grid.view-grid {
-  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
-}
-
-.cars-grid.view-list {
-  grid-template-columns: 1fr;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: var(--space-md);
 }
 
 .car-card {
-  background: rgba(26, 26, 26, 0.8);
   border: 1px solid var(--color-border);
-  overflow: hidden;
-  transition: all var(--duration-normal);
-  animation: fadeInUp 0.6s ease-out both;
+  transition: border-color var(--duration) var(--easing);
 }
 
 .car-card:hover {
-  border-color: var(--color-accent);
-  transform: translateY(-8px);
-  box-shadow: var(--shadow-lg);
+  border-color: var(--color-foreground);
 }
 
-.card-visual {
+.car-image {
   position: relative;
-  height: 240px;
-  background: linear-gradient(135deg, rgba(212, 175, 55, 0.1) 0%, rgba(196, 30, 58, 0.1) 100%);
+  aspect-ratio: 16 / 9;
+  background: var(--color-muted);
   display: flex;
   align-items: center;
   justify-content: center;
-  overflow: hidden;
-}
-
-.card-visual::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background:
-    linear-gradient(45deg, transparent 48%, var(--color-accent) 49%, var(--color-accent) 51%, transparent 52%),
-    linear-gradient(-45deg, transparent 48%, var(--color-accent) 49%, var(--color-accent) 51%, transparent 52%);
-  background-size: 40px 40px;
-  opacity: 0.03;
-}
-
-.visual-placeholder {
-  position: relative;
-  z-index: 1;
-}
-
-.car-icon {
-  width: 120px;
-  height: 120px;
-  color: var(--color-accent);
-  opacity: 0.4;
-}
-
-.card-badge {
-  position: absolute;
-  top: 1.5rem;
-  right: 1.5rem;
-  padding: 0.4rem 1rem;
-  background: var(--color-accent);
-  color: var(--color-primary);
-  font-family: var(--font-display);
-  font-size: 0.85rem;
-  letter-spacing: 0.1em;
-}
-
-.card-info {
-  padding: 2rem;
-}
-
-.car-title {
-  font-size: 1.4rem;
-  font-weight: 600;
-  margin-bottom: 1.5rem;
-  color: var(--color-text);
-  line-height: 1.3;
-}
-
-.car-specs {
-  display: flex;
-  align-items: center;
-  gap: 1.5rem;
-  margin-bottom: 1.5rem;
-  padding-bottom: 1.5rem;
   border-bottom: 1px solid var(--color-border);
 }
 
-.spec-item {
+.car-placeholder {
+  width: 80px;
+  height: 80px;
+  color: var(--color-muted-foreground);
+}
+
+.car-badge {
+  position: absolute;
+  top: var(--space-sm);
+  right: var(--space-sm);
+  padding: var(--space-xs) var(--space-sm);
+  background: var(--color-foreground);
+  color: var(--color-background);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.car-content {
+  padding: var(--space-md);
+}
+
+.car-name {
+  font-size: 16px;
+  font-weight: 600;
+  margin-bottom: var(--space-sm);
+  color: var(--color-foreground);
+}
+
+.car-specs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-sm);
+  margin-bottom: var(--space-md);
+  padding-bottom: var(--space-md);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.spec {
   display: flex;
   flex-direction: column;
-  gap: 0.3rem;
+  gap: var(--space-xs);
 }
 
-.spec-label {
-  font-size: 0.75rem;
-  color: var(--color-text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-}
-
-.spec-value {
+.spec dt {
+  font-size: 11px;
   font-weight: 600;
-  color: var(--color-text);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--color-muted-foreground);
 }
 
-.spec-divider {
-  width: 1px;
-  height: 30px;
-  background: var(--color-border);
+.spec dd {
+  font-size: 14px;
+  color: var(--color-foreground);
 }
 
-.car-pricing {
-  margin-bottom: 1.5rem;
+.car-price {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: var(--space-md);
 }
 
 .price-label {
-  font-size: 0.75rem;
-  color: var(--color-text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  margin-bottom: 0.5rem;
+  font-size: 12px;
+  color: var(--color-muted-foreground);
 }
 
 .price-value {
-  font-family: var(--font-display);
-  font-size: 1.8rem;
-  color: var(--color-accent-red);
-  letter-spacing: 0.05em;
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--color-foreground);
 }
 
-.card-actions {
-  display: flex;
-  gap: 1rem;
+.car-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-xs);
 }
 
-.action-btn {
-  flex: 1;
-  padding: 0.875rem;
+.action-button {
+  padding: var(--space-sm);
   border: 1px solid var(--color-border);
   background: transparent;
-  color: var(--color-text);
-  font-size: 0.9rem;
+  font-family: var(--font-sans);
+  font-size: 14px;
   font-weight: 500;
-  letter-spacing: 0.05em;
+  color: var(--color-foreground);
   cursor: pointer;
-  transition: all var(--duration-fast);
+  transition: all var(--duration) var(--easing);
 }
 
-.action-btn:hover {
-  transform: translateY(-2px);
+.action-button.primary {
+  background: var(--color-foreground);
+  color: var(--color-background);
 }
 
-.action-primary {
-  border-color: var(--color-accent);
-  color: var(--color-accent);
+.action-button.primary:hover {
+  opacity: 0.8;
 }
 
-.action-primary:hover {
-  background: var(--color-accent);
-  color: var(--color-primary);
+.action-button.secondary:hover {
+  background: var(--color-muted);
 }
 
-.action-secondary:hover {
-  border-color: var(--color-text);
-}
-
-/* 主题切换 */
-.theme-switcher {
-  position: fixed;
-  bottom: 2rem;
-  right: 2rem;
-  width: 56px;
-  height: 56px;
-  border-radius: 50%;
-  border: 1px solid var(--color-border);
-  background: rgba(26, 26, 26, 0.9);
-  backdrop-filter: blur(10px);
-  color: var(--color-accent);
-  font-size: 1.5rem;
-  cursor: pointer;
-  transition: all var(--duration-normal);
-  z-index: 50;
-  box-shadow: var(--shadow-md);
-}
-
-.theme-switcher:hover {
-  transform: rotate(180deg) scale(1.1);
-  border-color: var(--color-accent);
+.action-button:active {
+  transform: translateY(1px);
 }
 
 /* 响应式 */
 @media (max-width: 768px) {
-  .main-title {
-    font-size: 3.5rem;
+  .hero-title {
+    font-size: 36px;
   }
 
-  .title-highlight {
-    font-size: 4.5rem;
-  }
-
-  .title-number {
-    font-size: 2.5rem;
-  }
-
-  .search-wrapper {
-    flex-direction: column;
-  }
-
-  .cars-grid.view-grid {
+  .search-box {
     grid-template-columns: 1fr;
   }
 
-  .gallery-header {
-    flex-direction: column;
-    gap: 1rem;
-    align-items: flex-start;
+  .cars-grid {
+    grid-template-columns: 1fr;
   }
 }
 </style>
