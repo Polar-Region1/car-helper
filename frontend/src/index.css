@@ -46,6 +46,87 @@
   @apply top-4;
 }
 
+/* Prose styles for Markdown */
+.prose {
+  @apply max-w-none text-foreground;
+}
+
+.prose h1 {
+  @apply text-3xl font-bold mt-8 mb-4;
+}
+
+.prose h2 {
+  @apply text-2xl font-bold mt-6 mb-3 pb-2 border-b border-border;
+}
+
+.prose h3 {
+  @apply text-xl font-semibold mt-4 mb-2;
+}
+
+.prose p {
+  @apply mb-4 leading-7;
+}
+
+.prose ul, .prose ol {
+  @apply mb-4 ml-6;
+}
+
+.prose li {
+  @apply mb-2;
+}
+
+.prose ul li {
+  @apply list-disc;
+}
+
+.prose ol li {
+  @apply list-decimal;
+}
+
+.prose strong {
+  @apply font-semibold;
+}
+
+.prose em {
+  @apply italic;
+}
+
+.prose code {
+  @apply bg-muted px-1 py-0.5 font-mono text-sm;
+}
+
+.prose pre {
+  @apply bg-muted p-4 overflow-x-auto mb-4 font-mono text-sm;
+}
+
+.prose table {
+  @apply w-full border-collapse mb-6 text-sm;
+}
+
+.prose thead {
+  @apply bg-muted;
+}
+
+.prose th {
+  @apply border border-border px-4 py-3 text-left font-semibold;
+}
+
+.prose td {
+  @apply border border-border px-4 py-3;
+}
+
+.prose tr:hover {
+  @apply bg-muted/50;
+}
+
+.prose blockquote {
+  @apply border-l-4 border-border pl-4 italic my-4;
+}
+
+.prose a {
+  @apply underline hover:text-muted-foreground transition-colors;
+}
+
 /* Skeleton */
 @keyframes skeleton-pulse {
   0%, 100% {

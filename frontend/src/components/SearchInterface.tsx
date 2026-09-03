@@ -102,25 +102,33 @@ export function SearchInterface() {
     setDisplayCars([])
     setShowThinking(false)
 
+    // 用于存储完整结果
+    let fullAnalysis = ''
+    let fullThinking = ''
+    let fullCars: Car[] = []
+
     try {
       await sendChatMessage(q, sessionId, (chunk) => {
         if (chunk.type === 'reasoning_content') {
-          setThinkingProcess(prev => prev + chunk.content)
+          fullThinking += chunk.content
+          setThinkingProcess(fullThinking)
         } else if (chunk.type === 'content') {
-          setAiAnalysis(prev => prev + chunk.content)
+          fullAnalysis += chunk.content
+          setAiAnalysis(fullAnalysis)
         } else if (chunk.type === 'cars_data' && chunk.cars) {
-          setDisplayCars(chunk.cars)
+          fullCars = chunk.cars
+          setDisplayCars(fullCars)
         }
       })
 
       await loadSessions()
 
-      // 缓存结果
+      // 缓存结果 - 使用累积的完整数据
       const resultCache = {
         query: q,
-        analysis: aiAnalysis,
-        thinking: thinkingProcess,
-        cars: displayCars,
+        analysis: fullAnalysis,
+        thinking: fullThinking,
+        cars: fullCars,
         timestamp: Date.now()
       }
       localStorage.setItem(`session_result_${sessionId}`, JSON.stringify(resultCache))
@@ -141,22 +149,20 @@ export function SearchInterface() {
         const cached = JSON.parse(cachedResult)
         localStorage.setItem('current_session_id', sid)
 
+        // 直接显示缓存的结果，不重新查询
         setCurrentQuery(cached.query)
         setAiAnalysis(cached.analysis)
         setThinkingProcess(cached.thinking || '')
         setDisplayCars(cached.cars || [])
+        setSearchQuery('') // 清空搜索框
         return
       } catch (e) {
         console.error('Failed to parse cache:', e)
       }
     }
 
-    localStorage.setItem('current_session_id', sid)
-    const session = sessions.find(s => s.id === sid)
-    if (session && session.last_query) {
-      setSearchQuery(session.last_query)
-      handleSearch(session.last_query)
-    }
+    // 如果没有缓存，不要重新查询，只是提示用户
+    console.warn('No cache found for session:', sid)
   }
 
   if (hasResults) {
