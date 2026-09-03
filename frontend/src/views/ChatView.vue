@@ -328,6 +328,17 @@ export default {
           }
         )
         loadSessions()
+
+        // 缓存查询结果
+        const resultCache = {
+          query: currentQuery.value,
+          analysis: aiAnalysis.value,
+          thinking: thinkingProcess.value,
+          cars: displayCars.value,
+          timestamp: Date.now()
+        }
+        localStorage.setItem(`session_result_${sessionId.value}`, JSON.stringify(resultCache))
+
       } catch (error) {
         console.error('搜索失败:', error)
         aiAnalysis.value = `抱歉，查询出错了：${error.message}`
@@ -346,7 +357,31 @@ export default {
       }
     }
 
-    const resumeSession = (sid) => {
+    const resumeSession = async (sid) => {
+      // 检查是否有缓存的结果
+      const cachedResult = localStorage.getItem(`session_result_${sid}`)
+
+      if (cachedResult) {
+        // 有缓存，直接展示
+        try {
+          const cached = JSON.parse(cachedResult)
+          sessionId.value = sid
+          localStorage.setItem('current_session_id', sid)
+
+          currentQuery.value = cached.query
+          aiAnalysis.value = cached.analysis
+          thinkingProcess.value = cached.thinking || ''
+          displayCars.value = cached.cars || []
+
+          // 不需要重新查询
+          return
+        } catch (e) {
+          console.error('解析缓存失败:', e)
+          // 缓存损坏，继续正常流程
+        }
+      }
+
+      // 没有缓存，重新查询
       sessionId.value = sid
       localStorage.setItem('current_session_id', sid)
       const session = sessions.value.find(s => s.id === sid)
