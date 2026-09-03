@@ -1,169 +1,233 @@
 <template>
-  <div class="car-hub" :class="{ 'dark-mode': isDark }">
-    <!-- Hero区域 -->
-    <section class="hero-section" v-show="!hasResults">
-      <div class="hero-overlay"></div>
-      <div class="hero-content">
-        <h1 class="hero-title">
-          <span class="gradient-text">智能选车</span>
-          <br>从这里开始
-        </h1>
-        <p class="hero-subtitle">40,912款车型 · AI智能推荐 · 一键对比</p>
-
-        <!-- 主搜索栏 -->
-        <div class="hero-search">
-          <input
-            v-model="searchQuery"
-            @keydown.enter="handleSearch"
-            placeholder="说说你的需求，比如：20万左右的新能源SUV"
-            class="hero-input"
-            :disabled="isLoading"
-          />
-          <button @click="handleSearch" class="hero-button" :disabled="isLoading">
-            <span class="button-text">{{ isLoading ? '搜索中...' : '立即搜索' }}</span>
-            <span class="button-icon">→</span>
-          </button>
+  <div class="car-finder">
+    <!-- Hero区域 - 展厅风格 -->
+    <section class="hero-showroom" v-show="!hasResults">
+      <div class="hero-container">
+        <!-- 主标题区 -->
+        <div class="title-block">
+          <div class="title-line">
+            <span class="title-number">40,912</span>
+            <span class="title-text">款车型</span>
+          </div>
+          <h1 class="main-title">
+            FIND YOUR
+            <span class="title-highlight">PERFECT</span>
+            CAR
+          </h1>
+          <p class="subtitle">AI驱动的智能选车系统 · 精准匹配您的需求</p>
         </div>
 
-        <!-- 快速筛选标签 -->
-        <div class="quick-filters">
-          <button
-            v-for="tag in quickTags"
-            :key="tag.id"
-            @click="quickFilter(tag.query)"
-            class="filter-tag"
-            :disabled="isLoading"
-          >
-            {{ tag.label }}
-          </button>
+        <!-- 搜索框 - 简约大气 -->
+        <div class="search-container">
+          <div class="search-wrapper">
+            <input
+              v-model="searchQuery"
+              @keydown.enter="handleSearch"
+              placeholder="描述您的需求，例如：预算20万，新能源SUV，适合家用"
+              class="search-input"
+              :disabled="isLoading"
+            />
+            <button @click="handleSearch" class="search-submit" :disabled="isLoading">
+              <span v-if="!isLoading">搜索</span>
+              <span v-else class="loading-spinner"></span>
+            </button>
+          </div>
+
+          <!-- 快捷标签 - 扁平化设计 -->
+          <div class="quick-tags">
+            <button
+              v-for="tag in quickTags"
+              :key="tag.id"
+              @click="quickFilter(tag.query)"
+              class="tag-btn"
+              :disabled="isLoading"
+            >
+              {{ tag.label }}
+            </button>
+          </div>
         </div>
 
-        <!-- 历史会话 -->
-        <div class="history-section" v-if="sessions.length > 0">
-          <h3 class="history-title">最近会话</h3>
-          <div class="session-list">
+        <!-- 历史会话 - 卡片式 -->
+        <div class="history-panel" v-if="sessions.length > 0">
+          <div class="panel-header">
+            <span class="panel-title">最近搜索</span>
+            <span class="panel-count">{{ sessions.length }}</span>
+          </div>
+          <div class="session-grid">
             <div
-              v-for="session in sessions.slice(0, 5)"
+              v-for="(session, idx) in sessions.slice(0, 6)"
               :key="session.id"
               @click="resumeSession(session.id)"
-              class="session-item"
+              class="session-card"
+              :style="{ animationDelay: `${idx * 0.1}s` }"
             >
-              <div class="session-query">{{ session.last_query || '(无标题)' }}</div>
-              <div class="session-time">{{ formatTime(session.update_time) }}</div>
+              <div class="session-index">{{ String(idx + 1).padStart(2, '0') }}</div>
+              <div class="session-content">
+                <div class="session-query">{{ session.last_query || '(无标题)' }}</div>
+                <div class="session-meta">{{ formatTime(session.update_time) }}</div>
+              </div>
             </div>
           </div>
         </div>
       </div>
 
-      <!-- 滚动提示 -->
-      <div class="scroll-indicator" v-if="!isLoading">
-        <div class="scroll-arrow">↓</div>
-      </div>
-    </section>
-
-    <!-- 结果展示区域 -->
-    <section class="results-section" v-if="hasResults" ref="resultsArea">
-      <div class="container">
-        <!-- 查询信息栏 -->
-        <div class="query-info">
-          <div class="query-left">
-            <button @click="resetSearch" class="back-btn">← 返回</button>
-            <span class="query-label">当前搜索：</span>
-            <span class="query-text">{{ currentQuery }}</span>
-          </div>
-          <div class="query-right">
-            <button class="icon-btn" @click="toggleView" v-if="displayCars.length > 0">
-              <span v-if="viewMode === 'grid'">☷</span>
-              <span v-else>⊞</span>
-            </button>
-          </div>
-        </div>
-
-        <!-- AI分析面板 -->
-        <div class="ai-analysis" v-if="aiAnalysis || isLoading">
-          <div class="analysis-header">
-            <div class="ai-badge">
-              <span class="ai-icon">✨</span>
-              <span>AI分析</span>
-            </div>
-            <button @click="showThinking = !showThinking" class="toggle-btn" v-if="thinkingProcess">
-              {{ showThinking ? '收起思考' : '展开思考' }}
-            </button>
-          </div>
-
-          <div class="thinking-process" v-show="showThinking" v-if="thinkingProcess">
-            <div class="thinking-title">💭 思考过程</div>
-            <div class="thinking-text">{{ thinkingProcess }}</div>
-          </div>
-
-          <div class="analysis-content">
-            <div class="analysis-text" v-html="formatText(aiAnalysis)"></div>
-            <div v-if="isLoading && !aiAnalysis" class="typing-indicator">
-              <span></span><span></span><span></span>
-            </div>
-          </div>
-        </div>
-
-        <!-- 车型卡片网格 -->
-        <div class="cars-grid" :class="viewMode" v-if="displayCars.length > 0">
-          <div
-            v-for="(car, index) in displayCars"
-            :key="index"
-            class="car-card"
-            :style="{ animationDelay: `${index * 0.05}s` }"
-          >
-            <div class="card-image">
-              <div class="image-placeholder">
-                <span class="car-emoji">🚗</span>
-              </div>
-              <div class="card-badge" v-if="car.badge">{{ car.badge }}</div>
-            </div>
-
-            <div class="card-content">
-              <h3 class="car-name">{{ car.name }}</h3>
-              <div class="car-meta">
-                <span class="meta-item">
-                  <span class="meta-icon">⚡</span>
-                  {{ car.energy }}
-                </span>
-                <span class="meta-item">
-                  <span class="meta-icon">🏷️</span>
-                  {{ car.level }}
-                </span>
-              </div>
-
-              <div class="car-price">
-                <span class="price-label">指导价</span>
-                <span class="price-value">{{ car.price }}</span>
-              </div>
-
-              <div class="card-actions">
-                <button class="action-btn primary">查看详情</button>
-                <button class="action-btn secondary">加入对比</button>
-              </div>
-            </div>
-          </div>
-        </div>
+      <!-- 装饰元素 -->
+      <div class="hero-decoration">
+        <div class="deco-line deco-line-1"></div>
+        <div class="deco-line deco-line-2"></div>
       </div>
     </section>
 
-    <!-- 深色模式切换 -->
-    <button class="theme-toggle" @click="toggleTheme">
-      <span v-if="isDark">☀️</span>
-      <span v-else>🌙</span>
+    <!-- 结果区域 - 画廊风格 -->
+    <section class="results-gallery" v-if="hasResults">
+      <div class="gallery-container">
+        <!-- 顶部操作栏 -->
+        <div class="gallery-header">
+          <button @click="resetSearch" class="back-button">
+            <span class="back-arrow">←</span>
+            <span class="back-text">返回搜索</span>
+          </button>
+
+          <div class="header-info">
+            <span class="query-badge">{{ currentQuery }}</span>
+            <div class="view-controls" v-if="displayCars.length > 0">
+              <button
+                @click="viewMode = 'grid'"
+                class="view-btn"
+                :class="{ active: viewMode === 'grid' }"
+              >
+                网格
+              </button>
+              <button
+                @click="viewMode = 'list'"
+                class="view-btn"
+                :class="{ active: viewMode === 'list' }"
+              >
+                列表
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- AI分析面板 - 高端设计 -->
+        <div class="analysis-panel" v-if="aiAnalysis || isLoading">
+          <div class="panel-decoration">
+            <div class="deco-bar"></div>
+          </div>
+
+          <div class="panel-content">
+            <div class="panel-header-row">
+              <div class="panel-badge">
+                <span class="badge-icon">✦</span>
+                <span class="badge-text">AI 分析报告</span>
+              </div>
+              <button
+                v-if="thinkingProcess"
+                @click="showThinking = !showThinking"
+                class="thinking-toggle"
+              >
+                {{ showThinking ? '隐藏思考过程' : '查看思考过程' }}
+              </button>
+            </div>
+
+            <!-- 思考过程 -->
+            <div class="thinking-section" v-if="showThinking && thinkingProcess">
+              <div class="thinking-header">推理过程</div>
+              <div class="thinking-content">{{ thinkingProcess }}</div>
+            </div>
+
+            <!-- 分析内容 -->
+            <div class="analysis-content">
+              <div class="content-text" v-html="formatText(aiAnalysis)"></div>
+              <div v-if="isLoading && !aiAnalysis" class="loading-dots">
+                <span></span><span></span><span></span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 车型展示区 - 豪华卡片 -->
+        <div class="cars-showcase" v-if="displayCars.length > 0">
+          <div class="showcase-header">
+            <h2 class="showcase-title">推荐车型</h2>
+            <div class="showcase-count">{{ displayCars.length }} 款</div>
+          </div>
+
+          <div class="cars-grid" :class="`view-${viewMode}`">
+            <div
+              v-for="(car, index) in displayCars"
+              :key="index"
+              class="car-card"
+              :style="{ animationDelay: `${index * 0.08}s` }"
+            >
+              <!-- 车型图片区 -->
+              <div class="card-visual">
+                <div class="visual-placeholder">
+                  <svg class="car-icon" viewBox="0 0 24 24" fill="none">
+                    <path d="M5 13L3 15H6L5 13Z" stroke="currentColor" stroke-width="1.5"/>
+                    <path d="M19 13L21 15H18L19 13Z" stroke="currentColor" stroke-width="1.5"/>
+                    <path d="M5 17H19" stroke="currentColor" stroke-width="1.5"/>
+                    <path d="M6 11L8 6H16L18 11" stroke="currentColor" stroke-width="1.5"/>
+                    <path d="M4 15V11L6 11" stroke="currentColor" stroke-width="1.5"/>
+                    <path d="M20 15V11L18 11" stroke="currentColor" stroke-width="1.5"/>
+                  </svg>
+                </div>
+                <div class="card-badge" v-if="car.badge">{{ car.badge }}</div>
+              </div>
+
+              <!-- 车型信息 -->
+              <div class="card-info">
+                <h3 class="car-title">{{ car.name }}</h3>
+
+                <div class="car-specs">
+                  <div class="spec-item">
+                    <span class="spec-label">能源</span>
+                    <span class="spec-value">{{ car.energy }}</span>
+                  </div>
+                  <div class="spec-divider"></div>
+                  <div class="spec-item">
+                    <span class="spec-label">级别</span>
+                    <span class="spec-value">{{ car.level }}</span>
+                  </div>
+                </div>
+
+                <div class="car-pricing">
+                  <div class="price-label">指导价</div>
+                  <div class="price-value">{{ car.price }}</div>
+                </div>
+
+                <div class="card-actions">
+                  <button class="action-btn action-primary">
+                    <span>详情</span>
+                  </button>
+                  <button class="action-btn action-secondary">
+                    <span>对比</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 主题切换按钮 -->
+    <button class="theme-switcher" @click="toggleTheme" title="切换主题">
+      <span v-if="isDark">☀</span>
+      <span v-else>☾</span>
     </button>
   </div>
 </template>
 
 <script>
 import { ref, computed, onMounted, nextTick } from 'vue'
-import { sendChatMessage, getSessionHistory } from '@/utils/api'
+import { sendChatMessage } from '@/utils/api'
 import { marked } from 'marked'
 
 export default {
   name: 'ChatView',
   setup() {
-    const isDark = ref(false)
+    const isDark = ref(true) // 默认深色主题
     const searchQuery = ref('')
     const currentQuery = ref('')
     const aiAnalysis = ref('')
@@ -172,17 +236,14 @@ export default {
     const isLoading = ref(false)
     const viewMode = ref('grid')
     const displayCars = ref([])
-    const resultsArea = ref(null)
     const sessions = ref([])
 
-    // 从localStorage恢复session_id或创建新的
     let sessionId = ref(localStorage.getItem('current_session_id'))
     if (!sessionId.value) {
       sessionId.value = `session_${Date.now()}`
       localStorage.setItem('current_session_id', sessionId.value)
     }
 
-    // 配置marked
     marked.setOptions({
       breaks: true,
       gfm: true,
@@ -204,7 +265,6 @@ export default {
       try {
         return marked.parse(text)
       } catch (e) {
-        console.error('Markdown parse error:', e)
         return text.replace(/\n/g, '<br>')
       }
     }
@@ -215,7 +275,6 @@ export default {
         const date = new Date(timeStr)
         const now = new Date()
         const diff = Math.floor((now - date) / 1000)
-
         if (diff < 60) return '刚刚'
         if (diff < 3600) return `${Math.floor(diff / 60)}分钟前`
         if (diff < 86400) return `${Math.floor(diff / 3600)}小时前`
@@ -229,21 +288,9 @@ export default {
       isDark.value = !isDark.value
     }
 
-    const toggleView = () => {
-      viewMode.value = viewMode.value === 'grid' ? 'list' : 'grid'
-    }
-
     const quickFilter = (query) => {
       searchQuery.value = query
       handleSearch()
-    }
-
-    const scrollToBottom = () => {
-      nextTick(() => {
-        if (resultsArea.value) {
-          resultsArea.value.scrollTop = resultsArea.value.scrollHeight
-        }
-      })
     }
 
     const resetSearch = () => {
@@ -266,9 +313,6 @@ export default {
       displayCars.value = []
       showThinking.value = false
 
-      // 滚动到结果区域
-      setTimeout(scrollToBottom, 100)
-
       try {
         await sendChatMessage(
           searchQuery.value,
@@ -278,23 +322,17 @@ export default {
               thinkingProcess.value += chunk.content
             } else if (chunk.type === 'content') {
               aiAnalysis.value += chunk.content
-              scrollToBottom()
             } else if (chunk.type === 'cars_data') {
               displayCars.value = chunk.cars
-              scrollToBottom()
             }
           }
         )
-
-        // 查询完成后刷新会话列表
         loadSessions()
-
       } catch (error) {
         console.error('搜索失败:', error)
         aiAnalysis.value = `抱歉，查询出错了：${error.message}`
       } finally {
         isLoading.value = false
-        scrollToBottom()
       }
     }
 
@@ -311,8 +349,6 @@ export default {
     const resumeSession = (sid) => {
       sessionId.value = sid
       localStorage.setItem('current_session_id', sid)
-
-      // 找到会话的最后一个查询
       const session = sessions.value.find(s => s.id === sid)
       if (session && session.last_query) {
         searchQuery.value = session.last_query
@@ -320,7 +356,6 @@ export default {
       }
     }
 
-    // 组件挂载时加载会话列表
     onMounted(() => {
       loadSessions()
     })
@@ -337,12 +372,10 @@ export default {
       displayCars,
       quickTags,
       hasResults,
-      resultsArea,
       sessions,
       formatText,
       formatTime,
       toggleTheme,
-      toggleView,
       quickFilter,
       handleSearch,
       resetSearch,
@@ -353,681 +386,812 @@ export default {
 </script>
 
 <style scoped>
-.car-hub {
+.car-finder {
   min-height: 100vh;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  transition: all 0.3s ease;
-}
-
-.dark-mode {
-  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-}
-
-/* Hero区域 */
-.hero-section {
   position: relative;
-  min-height: 100vh;
+}
+
+/* ========== Hero Showroom ========== */
+.hero-showroom {
+  min-height: calc(100vh - 80px);
   display: flex;
   align-items: center;
   justify-content: center;
-  overflow: hidden;
-}
-
-.hero-overlay {
-  position: absolute;
-  inset: 0;
-  background:
-    radial-gradient(circle at 20% 50%, rgba(255,255,255,0.1) 0%, transparent 50%),
-    radial-gradient(circle at 80% 80%, rgba(255,255,255,0.1) 0%, transparent 50%);
-  pointer-events: none;
-}
-
-.hero-content {
   position: relative;
-  z-index: 10;
-  text-align: center;
-  padding: 2rem;
-  max-width: 900px;
-  width: 100%;
+  padding: 4rem 2rem;
 }
 
-.hero-title {
-  font-size: 4rem;
-  font-weight: 800;
-  color: white;
-  margin-bottom: 1rem;
-  line-height: 1.2;
+.hero-container {
+  max-width: 1200px;
+  width: 100%;
+  z-index: 2;
+}
+
+/* 标题区 */
+.title-block {
+  margin-bottom: 4rem;
   animation: fadeInUp 0.8s ease-out;
 }
 
-@keyframes fadeInUp {
-  from {
-    opacity: 0;
-    transform: translateY(30px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+.title-line {
+  display: flex;
+  align-items: baseline;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
 }
 
-.gradient-text {
-  background: linear-gradient(45deg, #fff, #a8edea);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+.title-number {
+  font-family: var(--font-display);
+  font-size: 4rem;
+  color: var(--color-accent);
+  line-height: 1;
+  letter-spacing: 0.05em;
 }
 
-.hero-subtitle {
-  font-size: 1.3rem;
-  color: rgba(255,255,255,0.9);
-  margin-bottom: 3rem;
+.title-text {
+  font-size: 1.2rem;
+  color: var(--color-text-muted);
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+}
+
+.main-title {
+  font-family: var(--font-display);
+  font-size: 5.5rem;
+  font-weight: 700;
+  line-height: 0.9;
+  letter-spacing: 0.02em;
+  margin-bottom: 1rem;
+  color: var(--color-text);
+}
+
+.title-highlight {
+  display: block;
+  color: var(--color-accent);
+  font-size: 6.5rem;
+  font-style: italic;
+}
+
+.subtitle {
+  font-size: 1.1rem;
+  color: var(--color-text-muted);
+  letter-spacing: 0.05em;
+  font-weight: 300;
+}
+
+/* 搜索容器 */
+.search-container {
+  margin-bottom: 4rem;
   animation: fadeInUp 0.8s ease-out 0.2s both;
 }
 
-.hero-search {
+.search-wrapper {
+  display: flex;
+  gap: 0;
+  margin-bottom: 2rem;
+  border: 2px solid var(--color-border);
+  transition: border-color var(--duration-normal);
+}
+
+.search-wrapper:focus-within {
+  border-color: var(--color-accent);
+}
+
+.search-input {
+  flex: 1;
+  padding: 1.5rem 2rem;
+  background: transparent;
+  border: none;
+  color: var(--color-text);
+  font-size: 1.1rem;
+  font-family: var(--font-body);
+  font-weight: 300;
+  letter-spacing: 0.02em;
+  outline: none;
+}
+
+.search-input::placeholder {
+  color: var(--color-text-muted);
+}
+
+.search-input:disabled {
+  opacity: 0.5;
+}
+
+.search-submit {
+  padding: 1.5rem 3rem;
+  background: var(--color-accent);
+  border: none;
+  color: var(--color-primary);
+  font-family: var(--font-display);
+  font-size: 1.2rem;
+  letter-spacing: 0.1em;
+  cursor: pointer;
+  transition: all var(--duration-normal);
+  position: relative;
+  overflow: hidden;
+}
+
+.search-submit::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.3), transparent);
+  transition: left 0.5s;
+}
+
+.search-submit:hover::before {
+  left: 100%;
+}
+
+.search-submit:hover {
+  background: #e5c158;
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
+}
+
+.search-submit:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.loading-spinner {
+  display: inline-block;
+  width: 20px;
+  height: 20px;
+  border: 2px solid var(--color-primary);
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* 快捷标签 */
+.quick-tags {
   display: flex;
   gap: 1rem;
-  max-width: 700px;
-  margin: 0 auto 2rem;
+  flex-wrap: wrap;
+}
+
+.tag-btn {
+  padding: 0.6rem 1.5rem;
+  background: transparent;
+  border: 1px solid var(--color-border);
+  color: var(--color-text-muted);
+  font-size: 0.9rem;
+  font-weight: 400;
+  letter-spacing: 0.05em;
+  cursor: pointer;
+  transition: all var(--duration-fast);
+}
+
+.tag-btn:hover:not(:disabled) {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+  transform: translateY(-2px);
+}
+
+.tag-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+/* 历史面板 */
+.history-panel {
   animation: fadeInUp 0.8s ease-out 0.4s both;
 }
 
-.hero-input {
-  flex: 1;
-  padding: 1.2rem 1.5rem;
-  border: 2px solid rgba(255,255,255,0.3);
-  border-radius: 16px;
-  font-size: 1rem;
-  background: rgba(255,255,255,0.1);
-  backdrop-filter: blur(10px);
-  color: white;
-  transition: all 0.3s;
-}
-
-.hero-input::placeholder {
-  color: rgba(255,255,255,0.6);
-}
-
-.hero-input:focus {
-  outline: none;
-  border-color: rgba(255,255,255,0.6);
-  background: rgba(255,255,255,0.15);
-}
-
-.hero-input:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-.hero-button {
-  padding: 1.2rem 2.5rem;
-  background: white;
-  border: none;
-  border-radius: 16px;
-  font-size: 1.1rem;
-  font-weight: 600;
-  color: #667eea;
-  cursor: pointer;
+.panel-header {
   display: flex;
+  justify-content: space-between;
   align-items: center;
-  gap: 0.5rem;
-  transition: all 0.3s;
+  margin-bottom: 1.5rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid var(--color-border);
 }
 
-.hero-button:hover:not(:disabled) {
-  transform: translateY(-2px);
-  box-shadow: 0 8px 24px rgba(0,0,0,0.2);
-}
-
-.hero-button:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-.button-icon {
+.panel-title {
+  font-family: var(--font-display);
   font-size: 1.5rem;
-  transition: transform 0.3s;
+  letter-spacing: 0.1em;
+  color: var(--color-text);
 }
 
-.hero-button:hover:not(:disabled) .button-icon {
-  transform: translateX(4px);
+.panel-count {
+  font-family: var(--font-display);
+  font-size: 1.2rem;
+  color: var(--color-accent);
 }
 
-.quick-filters {
+.session-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 1rem;
+}
+
+.session-card {
   display: flex;
   gap: 1rem;
-  justify-content: center;
-  flex-wrap: wrap;
-  animation: fadeInUp 0.8s ease-out 0.6s both;
-  margin-bottom: 2rem;
-}
-
-.filter-tag {
-  padding: 0.6rem 1.5rem;
-  background: rgba(255,255,255,0.15);
-  backdrop-filter: blur(10px);
-  border: 1px solid rgba(255,255,255,0.3);
-  border-radius: 24px;
-  color: white;
-  font-size: 0.9rem;
+  padding: 1.25rem;
+  background: rgba(26, 26, 26, 0.5);
+  border: 1px solid var(--color-border);
   cursor: pointer;
-  transition: all 0.3s;
+  transition: all var(--duration-normal);
+  animation: slideInRight 0.6s ease-out both;
 }
 
-.filter-tag:hover:not(:disabled) {
-  background: rgba(255,255,255,0.25);
-  transform: translateY(-2px);
+.session-card:hover {
+  border-color: var(--color-accent);
+  transform: translateX(8px);
+  background: rgba(26, 26, 26, 0.8);
 }
 
-.filter-tag:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
+.session-index {
+  font-family: var(--font-display);
+  font-size: 1.5rem;
+  color: var(--color-accent);
+  flex-shrink: 0;
 }
 
-/* 历史会话 */
-.history-section {
-  margin-top: 3rem;
-  animation: fadeInUp 0.8s ease-out 0.8s both;
-}
-
-.history-title {
-  color: white;
-  font-size: 1.2rem;
-  margin-bottom: 1rem;
-  opacity: 0.9;
-}
-
-.session-list {
-  display: flex;
-  flex-direction: column;
-  gap: 0.8rem;
-  max-width: 600px;
-  margin: 0 auto;
-}
-
-.session-item {
-  background: rgba(255,255,255,0.1);
-  backdrop-filter: blur(10px);
-  border: 1px solid rgba(255,255,255,0.2);
-  border-radius: 12px;
-  padding: 1rem 1.5rem;
-  cursor: pointer;
-  transition: all 0.3s;
-}
-
-.session-item:hover {
-  background: rgba(255,255,255,0.2);
-  transform: translateX(4px);
+.session-content {
+  flex: 1;
+  min-width: 0;
 }
 
 .session-query {
-  color: white;
+  color: var(--color-text);
   font-weight: 500;
-  margin-bottom: 0.3rem;
+  margin-bottom: 0.5rem;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.session-time {
-  color: rgba(255,255,255,0.6);
+.session-meta {
   font-size: 0.85rem;
+  color: var(--color-text-muted);
 }
 
-.scroll-indicator {
+/* 装饰元素 */
+.hero-decoration {
   position: absolute;
-  bottom: 2rem;
-  left: 50%;
-  transform: translateX(-50%);
-  animation: bounce 2s infinite;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
 }
 
-@keyframes bounce {
-  0%, 100% { transform: translateX(-50%) translateY(0); }
-  50% { transform: translateX(-50%) translateY(10px); }
+.deco-line {
+  position: absolute;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--color-accent), transparent);
+  opacity: 0.2;
 }
 
-.scroll-arrow {
-  color: white;
-  font-size: 2rem;
-  opacity: 0.7;
+.deco-line-1 {
+  top: 20%;
+  left: 0;
+  right: 0;
+  animation: slideLineRight 3s ease-in-out infinite;
 }
 
-/* 结果区域 */
-.results-section {
-  background: #f8f9fa;
-  min-height: 100vh;
-  padding: 2rem 0;
-  overflow-y: auto;
+.deco-line-2 {
+  bottom: 30%;
+  left: 0;
+  right: 0;
+  animation: slideLineLeft 3s ease-in-out infinite 1.5s;
 }
 
-.dark-mode .results-section {
-  background: #0f0f1e;
+@keyframes slideLineRight {
+  0%, 100% { transform: translateX(-100%); }
+  50% { transform: translateX(100%); }
 }
 
-.container {
-  max-width: 1400px;
+@keyframes slideLineLeft {
+  0%, 100% { transform: translateX(100%); }
+  50% { transform: translateX(-100%); }
+}
+
+/* ========== Results Gallery ========== */
+.results-gallery {
+  min-height: calc(100vh - 80px);
+  padding: 3rem 2rem;
+}
+
+.gallery-container {
+  max-width: 1600px;
   margin: 0 auto;
-  padding: 0 2rem;
 }
 
-.query-info {
+/* 顶部操作栏 */
+.gallery-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 1.5rem;
-  background: white;
-  border-radius: 16px;
-  margin-bottom: 2rem;
-  box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+  margin-bottom: 3rem;
+  padding-bottom: 1.5rem;
+  border-bottom: 1px solid var(--color-border);
+  animation: fadeInUp 0.6s ease-out;
 }
 
-.dark-mode .query-info {
-  background: #1a1a2e;
-  color: white;
-}
-
-.query-left {
+.back-button {
   display: flex;
   align-items: center;
-  gap: 1rem;
-  flex: 1;
-}
-
-.back-btn {
-  padding: 0.5rem 1rem;
-  background: #f0f0f0;
-  border: none;
-  border-radius: 8px;
+  gap: 0.75rem;
+  padding: 0.75rem 1.5rem;
+  background: transparent;
+  border: 1px solid var(--color-border);
+  color: var(--color-text);
+  font-size: 0.95rem;
   cursor: pointer;
-  font-weight: 500;
-  transition: all 0.3s;
+  transition: all var(--duration-fast);
 }
 
-.back-btn:hover {
-  background: #e0e0e0;
-  transform: translateX(-2px);
+.back-button:hover {
+  border-color: var(--color-accent);
+  transform: translateX(-4px);
 }
 
-.query-label {
-  color: #888;
-}
-
-.query-text {
-  font-weight: 600;
-  color: #667eea;
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.icon-btn {
-  width: 40px;
-  height: 40px;
-  border: none;
-  background: #f0f0f0;
-  border-radius: 8px;
-  cursor: pointer;
+.back-arrow {
   font-size: 1.2rem;
-  transition: all 0.3s;
 }
 
-.icon-btn:hover {
-  background: #e0e0e0;
-  transform: scale(1.05);
+.header-info {
+  display: flex;
+  align-items: center;
+  gap: 2rem;
+}
+
+.query-badge {
+  padding: 0.5rem 1.5rem;
+  background: rgba(212, 175, 55, 0.1);
+  border: 1px solid var(--color-accent);
+  color: var(--color-accent);
+  font-size: 0.9rem;
+  font-weight: 500;
+  letter-spacing: 0.05em;
+}
+
+.view-controls {
+  display: flex;
+  gap: 0;
+  border: 1px solid var(--color-border);
+}
+
+.view-btn {
+  padding: 0.5rem 1.25rem;
+  background: transparent;
+  border: none;
+  color: var(--color-text-muted);
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: all var(--duration-fast);
+}
+
+.view-btn:first-child {
+  border-right: 1px solid var(--color-border);
+}
+
+.view-btn.active {
+  background: var(--color-accent);
+  color: var(--color-primary);
 }
 
 /* AI分析面板 */
-.ai-analysis {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  border-radius: 16px;
-  padding: 2rem;
-  margin-bottom: 2rem;
-  color: white;
-  animation: slideIn 0.5s ease-out;
+.analysis-panel {
+  position: relative;
+  margin-bottom: 4rem;
+  padding: 3rem;
+  background: rgba(26, 26, 26, 0.8);
+  border: 1px solid var(--color-border);
+  animation: slideInRight 0.8s ease-out;
 }
 
-@keyframes slideIn {
-  from {
-    opacity: 0;
-    transform: translateY(20px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-.analysis-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 1rem;
-}
-
-.ai-badge {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  font-weight: 600;
-  font-size: 1.1rem;
-}
-
-.ai-icon {
-  font-size: 1.3rem;
-}
-
-.toggle-btn {
-  padding: 0.5rem 1rem;
-  background: rgba(255,255,255,0.2);
-  border: 1px solid rgba(255,255,255,0.3);
-  border-radius: 8px;
-  color: white;
-  cursor: pointer;
-  transition: all 0.3s;
-  font-size: 0.9rem;
-}
-
-.toggle-btn:hover {
-  background: rgba(255,255,255,0.3);
-}
-
-.analysis-content {
-  line-height: 1.8;
-  font-size: 1.05rem;
-  min-height: 2rem;
-}
-
-.analysis-text {
-  word-wrap: break-word;
-}
-
-.analysis-text :deep(h1),
-.analysis-text :deep(h2),
-.analysis-text :deep(h3) {
-  margin-top: 1.5rem;
-  margin-bottom: 0.8rem;
-}
-
-.analysis-text :deep(h2) {
-  font-size: 1.3rem;
-  border-bottom: 1px solid rgba(255,255,255,0.3);
-  padding-bottom: 0.5rem;
-}
-
-.analysis-text :deep(table) {
-  width: 100%;
-  border-collapse: collapse;
-  margin: 1rem 0;
-  background: rgba(255,255,255,0.1);
-  border-radius: 8px;
+.panel-decoration {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  width: 4px;
   overflow: hidden;
 }
 
-.analysis-text :deep(th),
-.analysis-text :deep(td) {
-  padding: 0.8rem;
-  border: 1px solid rgba(255,255,255,0.2);
+.deco-bar {
+  height: 40%;
+  width: 100%;
+  background: var(--color-accent);
+  animation: slideDecoBar 3s ease-in-out infinite;
+}
+
+@keyframes slideDecoBar {
+  0%, 100% { transform: translateY(-100%); }
+  50% { transform: translateY(250%); }
+}
+
+.panel-header-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 2rem;
+}
+
+.panel-badge {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.badge-icon {
+  font-size: 1.5rem;
+  color: var(--color-accent);
+}
+
+.badge-text {
+  font-family: var(--font-display);
+  font-size: 1.3rem;
+  letter-spacing: 0.1em;
+  color: var(--color-text);
+}
+
+.thinking-toggle {
+  padding: 0.5rem 1.25rem;
+  background: transparent;
+  border: 1px solid var(--color-border);
+  color: var(--color-text-muted);
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: all var(--duration-fast);
+}
+
+.thinking-toggle:hover {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+
+.thinking-section {
+  margin-bottom: 2rem;
+  padding: 1.5rem;
+  background: rgba(10, 10, 10, 0.6);
+  border-left: 2px solid var(--color-accent);
+}
+
+.thinking-header {
+  font-family: var(--font-display);
+  font-size: 1.1rem;
+  letter-spacing: 0.1em;
+  color: var(--color-accent);
+  margin-bottom: 1rem;
+}
+
+.thinking-content {
+  font-size: 0.95rem;
+  line-height: 1.8;
+  color: var(--color-text-muted);
+  white-space: pre-wrap;
+}
+
+.analysis-content {
+  font-size: 1.05rem;
+  line-height: 1.9;
+  color: var(--color-text);
+}
+
+.content-text :deep(h2) {
+  font-family: var(--font-display);
+  font-size: 1.8rem;
+  margin: 2rem 0 1rem;
+  color: var(--color-accent);
+  letter-spacing: 0.05em;
+}
+
+.content-text :deep(table) {
+  width: 100%;
+  margin: 2rem 0;
+  border-collapse: collapse;
+}
+
+.content-text :deep(th),
+.content-text :deep(td) {
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--color-border);
   text-align: left;
 }
 
-.analysis-text :deep(th) {
-  background: rgba(255,255,255,0.15);
+.content-text :deep(th) {
+  background: rgba(212, 175, 55, 0.1);
   font-weight: 600;
+  color: var(--color-accent);
 }
 
-.analysis-text :deep(ul),
-.analysis-text :deep(ol) {
+.content-text :deep(ul),
+.content-text :deep(ol) {
   margin: 1rem 0;
   padding-left: 2rem;
 }
 
-.analysis-text :deep(li) {
+.content-text :deep(li) {
   margin: 0.5rem 0;
 }
 
-.analysis-text :deep(code) {
-  background: rgba(0,0,0,0.2);
-  padding: 0.2rem 0.4rem;
-  border-radius: 4px;
-  font-family: monospace;
+.loading-dots {
+  display: flex;
+  gap: 0.5rem;
+  padding: 1rem 0;
 }
 
-.analysis-text :deep(pre) {
-  background: rgba(0,0,0,0.2);
-  padding: 1rem;
-  border-radius: 8px;
-  overflow-x: auto;
-  margin: 1rem 0;
-}
-
-.thinking-process {
-  margin-bottom: 1.5rem;
-  padding: 1rem;
-  background: rgba(0,0,0,0.2);
-  border-radius: 12px;
-  border: 1px solid rgba(255,255,255,0.2);
-}
-
-.thinking-title {
-  font-weight: 600;
-  margin-bottom: 0.8rem;
-  opacity: 0.9;
-}
-
-.thinking-text {
-  opacity: 0.8;
-  font-size: 0.95rem;
-  white-space: pre-wrap;
-  line-height: 1.6;
-}
-
-.typing-indicator {
-  display: inline-flex;
-  gap: 4px;
-  padding: 0.5rem 0;
-}
-
-.typing-indicator span {
+.loading-dots span {
   width: 8px;
   height: 8px;
+  background: var(--color-accent);
   border-radius: 50%;
-  background: rgba(255,255,255,0.8);
-  animation: typing 1.4s infinite;
+  animation: bounce-dot 1.4s infinite;
 }
 
-.typing-indicator span:nth-child(2) {
+.loading-dots span:nth-child(2) {
   animation-delay: 0.2s;
 }
 
-.typing-indicator span:nth-child(3) {
+.loading-dots span:nth-child(3) {
   animation-delay: 0.4s;
 }
 
-@keyframes typing {
-  0%, 60%, 100% { opacity: 0.3; transform: scale(0.8); }
-  30% { opacity: 1; transform: scale(1); }
+@keyframes bounce-dot {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
+  30% { transform: translateY(-10px); opacity: 1; }
 }
 
-/* 车型卡片网格 */
+/* 车型展示 */
+.cars-showcase {
+  animation: fadeInUp 0.8s ease-out 0.2s both;
+}
+
+.showcase-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 2rem;
+}
+
+.showcase-title {
+  font-family: var(--font-display);
+  font-size: 2.5rem;
+  letter-spacing: 0.1em;
+  color: var(--color-text);
+}
+
+.showcase-count {
+  font-family: var(--font-display);
+  font-size: 1.5rem;
+  color: var(--color-accent);
+}
+
 .cars-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
   gap: 2rem;
-  margin-bottom: 3rem;
+}
+
+.cars-grid.view-grid {
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+}
+
+.cars-grid.view-list {
+  grid-template-columns: 1fr;
 }
 
 .car-card {
-  background: white;
-  border-radius: 16px;
+  background: rgba(26, 26, 26, 0.8);
+  border: 1px solid var(--color-border);
   overflow: hidden;
-  box-shadow: 0 4px 20px rgba(0,0,0,0.08);
-  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-  animation: cardFadeIn 0.5s ease-out both;
-}
-
-@keyframes cardFadeIn {
-  from {
-    opacity: 0;
-    transform: translateY(20px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-.dark-mode .car-card {
-  background: #1a1a2e;
-  color: white;
+  transition: all var(--duration-normal);
+  animation: fadeInUp 0.6s ease-out both;
 }
 
 .car-card:hover {
+  border-color: var(--color-accent);
   transform: translateY(-8px);
-  box-shadow: 0 12px 40px rgba(102, 126, 234, 0.3);
+  box-shadow: var(--shadow-lg);
 }
 
-.card-image {
+.card-visual {
   position: relative;
-  height: 200px;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  height: 240px;
+  background: linear-gradient(135deg, rgba(212, 175, 55, 0.1) 0%, rgba(196, 30, 58, 0.1) 100%);
   display: flex;
   align-items: center;
   justify-content: center;
+  overflow: hidden;
 }
 
-.image-placeholder {
-  font-size: 4rem;
+.card-visual::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(45deg, transparent 48%, var(--color-accent) 49%, var(--color-accent) 51%, transparent 52%),
+    linear-gradient(-45deg, transparent 48%, var(--color-accent) 49%, var(--color-accent) 51%, transparent 52%);
+  background-size: 40px 40px;
+  opacity: 0.03;
+}
+
+.visual-placeholder {
+  position: relative;
+  z-index: 1;
+}
+
+.car-icon {
+  width: 120px;
+  height: 120px;
+  color: var(--color-accent);
+  opacity: 0.4;
 }
 
 .card-badge {
   position: absolute;
-  top: 1rem;
-  right: 1rem;
+  top: 1.5rem;
+  right: 1.5rem;
   padding: 0.4rem 1rem;
-  background: rgba(255,255,255,0.95);
-  border-radius: 20px;
+  background: var(--color-accent);
+  color: var(--color-primary);
+  font-family: var(--font-display);
   font-size: 0.85rem;
+  letter-spacing: 0.1em;
+}
+
+.card-info {
+  padding: 2rem;
+}
+
+.car-title {
+  font-size: 1.4rem;
   font-weight: 600;
-  color: #667eea;
+  margin-bottom: 1.5rem;
+  color: var(--color-text);
+  line-height: 1.3;
 }
 
-.card-content {
-  padding: 1.5rem;
-}
-
-.car-name {
-  font-size: 1.3rem;
-  font-weight: 700;
-  margin-bottom: 1rem;
-  color: #2c3e50;
-}
-
-.dark-mode .car-name {
-  color: white;
-}
-
-.car-meta {
-  display: flex;
-  gap: 1rem;
-  margin-bottom: 1rem;
-}
-
-.meta-item {
+.car-specs {
   display: flex;
   align-items: center;
+  gap: 1.5rem;
+  margin-bottom: 1.5rem;
+  padding-bottom: 1.5rem;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.spec-item {
+  display: flex;
+  flex-direction: column;
   gap: 0.3rem;
-  font-size: 0.9rem;
-  color: #666;
 }
 
-.dark-mode .meta-item {
-  color: #aaa;
+.spec-label {
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
 }
 
-.meta-icon {
-  font-size: 1.1rem;
+.spec-value {
+  font-weight: 600;
+  color: var(--color-text);
 }
 
-.car-price {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 1rem 0;
-  border-top: 1px solid #eee;
-  border-bottom: 1px solid #eee;
-  margin-bottom: 1rem;
+.spec-divider {
+  width: 1px;
+  height: 30px;
+  background: var(--color-border);
 }
 
-.dark-mode .car-price {
-  border-color: #333;
+.car-pricing {
+  margin-bottom: 1.5rem;
 }
 
 .price-label {
-  font-size: 0.85rem;
-  color: #888;
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  margin-bottom: 0.5rem;
 }
 
 .price-value {
-  font-size: 1.2rem;
-  font-weight: 700;
-  color: #e74c3c;
+  font-family: var(--font-display);
+  font-size: 1.8rem;
+  color: var(--color-accent-red);
+  letter-spacing: 0.05em;
 }
 
 .card-actions {
   display: flex;
-  gap: 0.8rem;
+  gap: 1rem;
 }
 
 .action-btn {
   flex: 1;
-  padding: 0.8rem;
-  border: none;
-  border-radius: 8px;
-  font-weight: 600;
+  padding: 0.875rem;
+  border: 1px solid var(--color-border);
+  background: transparent;
+  color: var(--color-text);
+  font-size: 0.9rem;
+  font-weight: 500;
+  letter-spacing: 0.05em;
   cursor: pointer;
-  transition: all 0.3s;
+  transition: all var(--duration-fast);
 }
 
-.action-btn.primary {
-  background: #667eea;
-  color: white;
-}
-
-.action-btn.primary:hover {
-  background: #5568d3;
+.action-btn:hover {
   transform: translateY(-2px);
 }
 
-.action-btn.secondary {
-  background: #f0f0f0;
-  color: #555;
+.action-primary {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
 }
 
-.action-btn.secondary:hover {
-  background: #e0e0e0;
+.action-primary:hover {
+  background: var(--color-accent);
+  color: var(--color-primary);
+}
+
+.action-secondary:hover {
+  border-color: var(--color-text);
 }
 
 /* 主题切换 */
-.theme-toggle {
+.theme-switcher {
   position: fixed;
   bottom: 2rem;
   right: 2rem;
-  width: 60px;
-  height: 60px;
+  width: 56px;
+  height: 56px;
   border-radius: 50%;
-  border: none;
-  background: white;
-  box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+  border: 1px solid var(--color-border);
+  background: rgba(26, 26, 26, 0.9);
+  backdrop-filter: blur(10px);
+  color: var(--color-accent);
   font-size: 1.5rem;
   cursor: pointer;
-  transition: all 0.3s;
-  z-index: 100;
+  transition: all var(--duration-normal);
+  z-index: 50;
+  box-shadow: var(--shadow-md);
 }
 
-.theme-toggle:hover {
-  transform: scale(1.1) rotate(20deg);
+.theme-switcher:hover {
+  transform: rotate(180deg) scale(1.1);
+  border-color: var(--color-accent);
+}
+
+/* 响应式 */
+@media (max-width: 768px) {
+  .main-title {
+    font-size: 3.5rem;
+  }
+
+  .title-highlight {
+    font-size: 4.5rem;
+  }
+
+  .title-number {
+    font-size: 2.5rem;
+  }
+
+  .search-wrapper {
+    flex-direction: column;
+  }
+
+  .cars-grid.view-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .gallery-header {
+    flex-direction: column;
+    gap: 1rem;
+    align-items: flex-start;
+  }
 }
 </style>

@@ -1,17 +1,32 @@
 <template>
   <div class="app-container">
-    <!-- 顶部导航栏 -->
+    <!-- 顶部导航栏 - 极简设计 -->
     <header class="navbar">
       <div class="nav-content">
         <div class="logo-section">
-          <div class="logo">Car Helper</div>
-          <div class="slogan">找车，就这么简单</div>
+          <div class="logo">CAR HELPER</div>
+          <div class="logo-subtitle">智能选车系统</div>
         </div>
         <nav class="nav-links">
-          <a href="#" class="nav-link active">选车</a>
-          <a href="#" class="nav-link">对比</a>
-          <a href="#" class="nav-link">资讯</a>
+          <a href="#" class="nav-link active">
+            <span class="link-number">01</span>
+            <span class="link-text">选车</span>
+          </a>
+          <a href="#" class="nav-link">
+            <span class="link-number">02</span>
+            <span class="link-text">对比</span>
+          </a>
+          <a href="#" class="nav-link">
+            <span class="link-number">03</span>
+            <span class="link-text">资讯</span>
+          </a>
         </nav>
+        <div class="nav-stats">
+          <div class="stat-item">
+            <div class="stat-value">40.9K</div>
+            <div class="stat-label">车型</div>
+          </div>
+        </div>
       </div>
     </header>
 
@@ -19,6 +34,9 @@
     <main class="main-content">
       <ChatView />
     </main>
+
+    <!-- 装饰性网格背景 -->
+    <div class="grid-overlay"></div>
   </div>
 </template>
 
@@ -35,80 +53,193 @@ export default {
 
 <style scoped>
 .app-container {
+  position: relative;
   width: 100%;
   min-height: 100vh;
-  background: #f5f7fa;
-  display: flex;
-  flex-direction: column;
+  background: var(--color-primary);
 }
 
+/* 装饰性网格背景 */
+.grid-overlay {
+  position: fixed;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(212, 175, 55, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(212, 175, 55, 0.03) 1px, transparent 1px);
+  background-size: 100px 100px;
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* 导航栏 */
 .navbar {
-  background: white;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.08);
-  position: sticky;
+  position: fixed;
   top: 0;
+  left: 0;
+  right: 0;
+  background: rgba(10, 10, 10, 0.9);
+  backdrop-filter: blur(20px);
+  border-bottom: 1px solid var(--color-border);
   z-index: 100;
+  animation: slideDown 0.6s ease-out;
+}
+
+@keyframes slideDown {
+  from {
+    transform: translateY(-100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
 }
 
 .nav-content {
-  max-width: 1400px;
+  max-width: 1600px;
   margin: 0 auto;
-  padding: 0 2rem;
-  display: flex;
-  justify-content: space-between;
+  padding: 0 3rem;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
   align-items: center;
-  height: 70px;
+  height: 80px;
+  gap: 3rem;
 }
 
 .logo-section {
   display: flex;
-  align-items: center;
-  gap: 1rem;
+  flex-direction: column;
+  gap: 0.25rem;
 }
 
 .logo {
+  font-family: var(--font-display);
   font-size: 1.8rem;
   font-weight: 700;
-  color: #2c3e50;
-  letter-spacing: -0.5px;
+  letter-spacing: 0.1em;
+  color: var(--color-text);
+  position: relative;
 }
 
-.slogan {
-  color: #7f8c8d;
-  font-size: 0.9rem;
-  padding-left: 1rem;
-  border-left: 2px solid #e0e0e0;
+.logo::after {
+  content: '';
+  position: absolute;
+  bottom: -4px;
+  left: 0;
+  width: 40px;
+  height: 2px;
+  background: var(--color-accent);
+}
+
+.logo-subtitle {
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
 }
 
 .nav-links {
   display: flex;
   gap: 2rem;
+  justify-content: center;
 }
 
 .nav-link {
-  color: #555;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25rem;
   text-decoration: none;
+  color: var(--color-text-muted);
+  transition: color var(--duration-fast);
+  position: relative;
+  padding: 0.5rem 0;
+}
+
+.link-number {
+  font-family: var(--font-display);
+  font-size: 0.75rem;
+  letter-spacing: 0.1em;
+}
+
+.link-text {
+  font-size: 0.9rem;
   font-weight: 500;
-  padding: 0.5rem 1rem;
-  border-radius: 6px;
-  transition: all 0.2s;
+  letter-spacing: 0.05em;
 }
 
-.nav-link:hover {
-  background: #f0f0f0;
-  color: #2c3e50;
+.nav-link::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%) scaleX(0);
+  width: 100%;
+  height: 2px;
+  background: var(--color-accent);
+  transition: transform var(--duration-normal);
 }
 
+.nav-link:hover,
 .nav-link.active {
-  background: #3498db;
-  color: white;
+  color: var(--color-text);
+}
+
+.nav-link.active::after {
+  transform: translateX(-50%) scaleX(1);
+}
+
+.nav-stats {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.stat-item {
+  text-align: right;
+}
+
+.stat-value {
+  font-family: var(--font-display);
+  font-size: 1.5rem;
+  color: var(--color-accent);
+  line-height: 1;
+}
+
+.stat-label {
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  margin-top: 0.25rem;
 }
 
 .main-content {
-  flex: 1;
-  padding: 2rem;
-  max-width: 1400px;
-  width: 100%;
-  margin: 0 auto;
+  position: relative;
+  z-index: 1;
+  padding-top: 80px;
+}
+
+/* 响应式 */
+@media (max-width: 1024px) {
+  .nav-content {
+    grid-template-columns: auto 1fr;
+    padding: 0 2rem;
+  }
+
+  .nav-stats {
+    display: none;
+  }
+}
+
+@media (max-width: 768px) {
+  .nav-content {
+    grid-template-columns: 1fr;
+    height: auto;
+    padding: 1rem;
+  }
+
+  .nav-links {
+    display: none;
+  }
 }
 </style>

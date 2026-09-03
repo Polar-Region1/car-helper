@@ -1,3 +1,30 @@
+@import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Outfit:wght@300;400;500;600;700&display=swap');
+
+:root {
+  /* 高端汽车展厅配色 */
+  --color-primary: #0a0a0a;
+  --color-secondary: #1a1a1a;
+  --color-accent: #d4af37; /* 金色点缀 */
+  --color-accent-red: #c41e3a; /* 跑车红 */
+  --color-text: #ffffff;
+  --color-text-muted: #888888;
+  --color-border: #2a2a2a;
+
+  /* 字体 */
+  --font-display: 'Bebas Neue', sans-serif; /* 展示用 */
+  --font-body: 'Outfit', sans-serif; /* 正文用 */
+
+  /* 阴影 */
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 16px 48px rgba(0, 0, 0, 0.5);
+
+  /* 动画时长 */
+  --duration-fast: 0.2s;
+  --duration-normal: 0.4s;
+  --duration-slow: 0.8s;
+}
+
 * {
   margin: 0;
   padding: 0;
@@ -5,13 +32,13 @@
 }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
-    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
-    'Microsoft YaHei', sans-serif;
+  font-family: var(--font-body);
+  font-weight: 400;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  background: #f5f7fa;
-  color: #2c3e50;
+  background: var(--color-primary);
+  color: var(--color-text);
+  overflow-x: hidden;
 }
 
 #app {
@@ -19,21 +46,59 @@ body {
   min-height: 100vh;
 }
 
+/* 自定义滚动条 */
 ::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
+  width: 8px;
+  height: 8px;
 }
 
 ::-webkit-scrollbar-track {
-  background: #f1f1f1;
-  border-radius: 5px;
+  background: var(--color-primary);
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #bbb;
-  border-radius: 5px;
+  background: var(--color-accent);
+  border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #999;
+  background: #e5c158;
+}
+
+/* 全局动画 */
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(40px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes slideInRight {
+  from {
+    opacity: 0;
+    transform: translateX(60px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: -1000px 0;
+  }
+  100% {
+    background-position: 1000px 0;
+  }
+}
+
+/* 选择高亮 */
+::selection {
+  background: var(--color-accent);
+  color: var(--color-primary);
 }
