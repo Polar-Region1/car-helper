@@ -1,27 +1,30 @@
 <template>
   <div class="app-container">
+    <!-- Skip link for keyboard users -->
+    <a href="#main-content" class="skip-link">跳转到主要内容</a>
+
     <!-- 顶部导航栏 - 极简设计 -->
-    <header class="navbar">
+    <header class="navbar" role="banner">
       <div class="nav-content">
         <div class="logo-section">
           <div class="logo">CAR HELPER</div>
           <div class="logo-subtitle">智能选车系统</div>
         </div>
-        <nav class="nav-links">
-          <a href="#" class="nav-link active">
-            <span class="link-number">01</span>
+        <nav class="nav-links" role="navigation" aria-label="主导航">
+          <a href="#" class="nav-link active" aria-current="page">
+            <span class="link-number" aria-hidden="true">01</span>
             <span class="link-text">选车</span>
           </a>
           <a href="#" class="nav-link">
-            <span class="link-number">02</span>
+            <span class="link-number" aria-hidden="true">02</span>
             <span class="link-text">对比</span>
           </a>
           <a href="#" class="nav-link">
-            <span class="link-number">03</span>
+            <span class="link-number" aria-hidden="true">03</span>
             <span class="link-text">资讯</span>
           </a>
         </nav>
-        <div class="nav-stats">
+        <div class="nav-stats" aria-label="数据统计">
           <div class="stat-item">
             <div class="stat-value">40.9K</div>
             <div class="stat-label">车型</div>
@@ -31,12 +34,12 @@
     </header>
 
     <!-- 主体内容 -->
-    <main class="main-content">
+    <main class="main-content" id="main-content" role="main">
       <ChatView />
     </main>
 
     <!-- 装饰性网格背景 -->
-    <div class="grid-overlay"></div>
+    <div class="grid-overlay" aria-hidden="true"></div>
   </div>
 </template>
 
@@ -156,6 +159,15 @@ export default {
   padding: 0.5rem 0;
 }
 
+/* 改进hover和active状态 */
+.nav-link:hover {
+  color: var(--color-text);
+}
+
+.nav-link:active {
+  transform: scale(0.98);
+}
+
 .link-number {
   font-family: var(--font-display);
   font-size: 0.75rem;
@@ -180,13 +192,13 @@ export default {
   transition: transform var(--duration-normal);
 }
 
-.nav-link:hover,
-.nav-link.active {
-  color: var(--color-text);
-}
-
+.nav-link:hover::after,
 .nav-link.active::after {
   transform: translateX(-50%) scaleX(1);
+}
+
+.nav-link.active {
+  color: var(--color-text);
 }
 
 .nav-stats {
@@ -243,3 +255,4 @@ export default {
   }
 }
 </style>
+
