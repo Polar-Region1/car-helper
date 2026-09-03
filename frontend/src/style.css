@@ -1,32 +1,42 @@
-@import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Outfit:wght@300;400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;900&display=swap');
 
 :root {
-  /* 高端汽车展厅配色 */
-  --color-primary: #0a0a0a;
-  --color-secondary: #1a1a1a;
-  --color-accent: #d4af37; /* 金色点缀 */
-  --color-accent-red: #c41e3a; /* 跑车红 */
-  --color-text: #ffffff;
-  --color-text-muted: #888888;
-  --color-border: #2a2a2a;
+  /* 极简黑白配色 */
+  --color-primary: #000000;
+  --color-background: #FFFFFF;
+  --color-foreground: #000000;
+  --color-muted: #F5F5F5;
+  --color-muted-foreground: #737373;
+  --color-border: #E5E5E5;
+  --color-accent: #000000;
 
-  /* 字体 */
-  --font-display: 'Bebas Neue', sans-serif; /* 展示用 */
-  --font-body: 'Outfit', sans-serif; /* 正文用 */
+  /* 瑞士风格字体 - Inter单一字体族 */
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
 
-  /* 阴影 */
-  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.3);
-  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.4);
-  --shadow-lg: 0 16px 48px rgba(0, 0, 0, 0.5);
+  /* 网格系统 */
+  --grid-columns: 12;
+  --grid-gap: 2rem;
+  --container-max: 1200px;
 
-  /* 动画时长 */
-  --duration-fast: 0.2s;
-  --duration-normal: 0.4s;
-  --duration-slow: 0.8s;
+  /* 极简间距 */
+  --space-xs: 0.5rem;
+  --space-sm: 1rem;
+  --space-md: 2rem;
+  --space-lg: 4rem;
+  --space-xl: 8rem;
 
-  /* Focus ring - 可访问性关键 */
-  --focus-ring: 0 0 0 3px rgba(212, 175, 55, 0.4);
-  --focus-ring-offset: 2px;
+  /* 无圆角 */
+  --radius: 0px;
+
+  /* 无阴影 */
+  --shadow: none;
+
+  /* 动画 - 快速简洁 */
+  --duration: 200ms;
+  --easing: cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* Focus - 极简边框 */
+  --focus-ring: 0 0 0 2px var(--color-primary);
 }
 
 * {
@@ -36,13 +46,14 @@
 }
 
 body {
-  font-family: var(--font-body);
+  font-family: var(--font-sans);
+  font-size: 16px;
   font-weight: 400;
+  line-height: 1.5;
+  color: var(--color-foreground);
+  background: var(--color-background);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  background: var(--color-primary);
-  color: var(--color-text);
-  overflow-x: hidden;
 }
 
 #app {
@@ -50,113 +61,103 @@ body {
   min-height: 100vh;
 }
 
-/* 全局焦点样式 - 可访问性关键 */
+/* 焦点样式 - 黑色边框 */
 *:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
-  outline-offset: var(--focus-ring-offset);
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
 }
 
-button:focus-visible,
-a:focus-visible,
-input:focus-visible,
-textarea:focus-visible {
-  box-shadow: var(--focus-ring);
-}
-
-/* Skip link for keyboard users */
+/* Skip link */
 .skip-link {
   position: absolute;
   top: -100px;
-  left: 0;
-  background: var(--color-accent);
-  color: var(--color-primary);
-  padding: 0.75rem 1.5rem;
+  left: var(--space-md);
+  background: var(--color-primary);
+  color: var(--color-background);
+  padding: var(--space-sm) var(--space-md);
   text-decoration: none;
-  font-weight: 600;
+  font-weight: 500;
   z-index: 9999;
-  transition: top 0.3s;
+  border: 2px solid var(--color-primary);
 }
 
 .skip-link:focus {
-  top: 0;
+  top: var(--space-sm);
 }
 
-/* 自定义滚动条 */
+/* 滚动条 - 极简 */
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
 
 ::-webkit-scrollbar-track {
-  background: var(--color-primary);
+  background: var(--color-background);
 }
 
 ::-webkit-scrollbar-thumb {
-  background: var(--color-accent);
-  border-radius: 4px;
+  background: var(--color-border);
+  border-radius: 0;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #e5c158;
+  background: var(--color-muted-foreground);
 }
 
-/* 全局动画 */
-@keyframes fadeInUp {
-  from {
-    opacity: 0;
-    transform: translateY(40px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+/* 选择高亮 */
+::selection {
+  background: var(--color-primary);
+  color: var(--color-background);
 }
 
-@keyframes slideInRight {
-  from {
-    opacity: 0;
-    transform: translateX(60px);
-  }
-  to {
-    opacity: 1;
-    transform: translateX(0);
-  }
+/* Grid辅助线（开发用） */
+.grid-debug {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 9999;
+  background-image:
+    repeating-linear-gradient(
+      to right,
+      transparent,
+      transparent calc(100% / 12 - 1px),
+      rgba(0, 0, 0, 0.05) calc(100% / 12 - 1px),
+      rgba(0, 0, 0, 0.05) calc(100% / 12)
+    );
 }
 
-@keyframes shimmer {
-  0% {
-    background-position: -1000px 0;
-  }
-  100% {
-    background-position: 1000px 0;
-  }
+/* Skeleton - 极简版 */
+.skeleton {
+  background: var(--color-muted);
+  animation: skeleton-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
 
-/* Skeleton loading animation */
 @keyframes skeleton-pulse {
   0%, 100% {
     opacity: 1;
   }
   50% {
-    opacity: 0.4;
+    opacity: 0.5;
   }
 }
 
-.skeleton {
-  animation: skeleton-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
-  background: linear-gradient(
-    90deg,
-    rgba(42, 42, 42, 0.4) 0%,
-    rgba(42, 42, 42, 0.6) 50%,
-    rgba(42, 42, 42, 0.4) 100%
-  );
-  background-size: 200% 100%;
-  animation: shimmer 2s infinite;
+/* 极简动画 */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
-/* 选择高亮 */
-::selection {
-  background: var(--color-accent);
-  color: var(--color-primary);
+@keyframes slideUp {
+  from {
+    transform: translateY(20px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
 }
