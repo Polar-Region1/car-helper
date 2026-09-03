@@ -1,26 +1,38 @@
 {
   "name": "car-helper-frontend",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "type": "module",
-  "description": "Car Helper 前端界面",
+  "description": "Car Helper Frontend - React + Tailwind + shadcn/ui",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
-    "preview": "vite preview"
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0"
   },
-  "keywords": [
-    "vue",
-    "car",
-    "recommendation"
-  ],
-  "author": "",
-  "license": "ISC",
   "dependencies": {
-    "@vitejs/plugin-vue": "^6.0.8",
-    "axios": "^1.20.0",
-    "echarts": "^6.1.0",
-    "marked": "^18.0.11",
-    "vite": "^8.2.2",
-    "vue": "^3.5.42"
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.26.2",
+    "@radix-ui/react-dialog": "^1.1.1",
+    "@radix-ui/react-slot": "^1.1.0",
+    "class-variance-authority": "^0.7.0",
+    "clsx": "^2.1.1",
+    "tailwind-merge": "^2.5.2",
+    "marked": "^14.1.2"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.5",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.1",
+    "typescript": "^5.5.3",
+    "vite": "^5.4.3",
+    "tailwindcss": "^3.4.10",
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.4.45",
+    "@typescript-eslint/eslint-plugin": "^7.18.0",
+    "@typescript-eslint/parser": "^7.18.0",
+    "eslint": "^8.57.0",
+    "eslint-plugin-react-hooks": "^4.6.2",
+    "eslint-plugin-react-refresh": "^0.4.11"
   }
 }
