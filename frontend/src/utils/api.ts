@@ -98,3 +98,17 @@ export async function getSessionHistory(): Promise<Session[]> {
   const data = await response.json()
   return data.sessions || []
 }
+
+export interface Message {
+  role: 'user' | 'agent'
+  content: string
+}
+
+export async function getSessionMessages(sessionId: string): Promise<Message[]> {
+  const response = await fetch(`/api/sessions/${sessionId}/messages`)
+  if (!response.ok) {
+    throw new Error(`HTTP error! status: ${response.status}`)
+  }
+  const data = await response.json()
+  return data.messages || []
+}

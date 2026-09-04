@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { marked } from 'marked'
-import { sendChatMessage, getSessionHistory, type Session } from '@/utils/api'
+import { sendChatMessage, getSessionHistory, getSessionMessages, type Session } from '@/utils/api'
 import { cn } from '@/lib/utils'
 
 // 配置marked
@@ -29,15 +29,17 @@ const quickTags = [
 
 export function SearchInterface() {
   const [searchQuery, setSearchQuery] = useState('')
-  const [currentQuery, setCurrentQuery] = useState('')
   const [aiAnalysis, setAiAnalysis] = useState('')
   const [thinkingProcess, setThinkingProcess] = useState('')
   const [showThinking, setShowThinking] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [displayCars, setDisplayCars] = useState<Car[]>([])
   const [sessions, setSessions] = useState<Session[]>([])
+  const [showHistory, setShowHistory] = useState(false)
+  const historyRef = useRef<HTMLDivElement>(null)
+  const [currentQuery, setCurrentQuery] = useState('')
 
-  const [sessionId] = useState(() => {
+  const [sessionId, setSessionId] = useState(() => {
     let id = localStorage.getItem('current_session_id')
     if (!id) {
       id = `session_${Date.now()}`
@@ -50,6 +52,16 @@ export function SearchInterface() {
 
   useEffect(() => {
     loadSessions()
+
+    // 点击外部关闭历史下拉框
+    const handleClickOutside = (event: MouseEvent) => {
+      if (historyRef.current && !historyRef.current.contains(event.target as Node)) {
+        setShowHistory(false)
+      }
+    }
+
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [])
 
   const loadSessions = async () => {
@@ -142,33 +154,52 @@ export function SearchInterface() {
   }
 
   const resumeSession = async (sid: string) => {
-    const cachedResult = localStorage.getItem(`session_result_${sid}`)
+    setShowHistory(false) // 关闭下拉框
 
+    // 切换到该会话
+    localStorage.setItem('current_session_id', sid)
+    setSessionId(sid) // 更新 React 状态
+
+    // 先尝试从 localStorage 读取缓存
+    const cachedResult = localStorage.getItem(`session_result_${sid}`)
     if (cachedResult) {
       try {
         const cached = JSON.parse(cachedResult)
-        localStorage.setItem('current_session_id', sid)
-
-        // 直接显示缓存的结果，不重新查询
         setCurrentQuery(cached.query)
         setAiAnalysis(cached.analysis)
         setThinkingProcess(cached.thinking || '')
         setDisplayCars(cached.cars || [])
-        setSearchQuery('') // 清空搜索框
+        setSearchQuery('')
         return
       } catch (e) {
         console.error('Failed to parse cache:', e)
       }
     }
 
-    // 如果没有缓存，重新查询（但用新的session_id）
-    localStorage.setItem('current_session_id', sid)
-    const session = sessions.find(s => s.id === sid)
-    if (session && session.last_query) {
-      setSearchQuery(session.last_query)
-      // 不直接调用handleSearch，而是设置查询让用户看到
-      // 或者可以自动触发
-      handleSearch(session.last_query)
+    // 如果没有缓存，从 PostgreSQL 加载历史消息
+    try {
+      const messages = await getSessionMessages(sid)
+      if (messages.length === 0) {
+        console.warn('No messages found for session:', sid)
+        return
+      }
+
+      // 渲染历史对话（最后一轮问答）
+      const lastUserMsg = messages.filter(m => m.role === 'user').pop()
+      const lastAgentMsg = messages.filter(m => m.role === 'agent').pop()
+
+      if (lastUserMsg) {
+        setCurrentQuery(lastUserMsg.content)
+        setSearchQuery('')
+      }
+
+      if (lastAgentMsg) {
+        setAiAnalysis(lastAgentMsg.content)
+        setThinkingProcess('')
+        setDisplayCars([])
+      }
+    } catch (error) {
+      console.error('Failed to load session messages:', error)
     }
   }
 
@@ -176,13 +207,52 @@ export function SearchInterface() {
     return (
       <section className="py-16">
         <div className="container mx-auto px-8">
-          {/* Back button */}
-          <button
-            onClick={resetSearch}
-            className="px-6 py-3 mb-16 border border-border bg-transparent text-sm text-foreground hover:bg-foreground hover:text-background transition-all"
-          >
-            ← Back to Search
-          </button>
+          {/* Header with back button and history dropdown */}
+          <div className="flex justify-between items-center mb-16">
+            <button
+              onClick={resetSearch}
+              className="px-6 py-3 border border-border bg-transparent text-sm text-foreground hover:bg-foreground hover:text-background transition-all"
+            >
+              ← Back to Search
+            </button>
+
+            {/* History Dropdown */}
+            <div className="relative" ref={historyRef}>
+              <button
+                onClick={() => setShowHistory(!showHistory)}
+                className="px-6 py-3 border border-border bg-transparent text-sm text-foreground hover:bg-foreground hover:text-background transition-all flex items-center gap-2"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                History ({Math.min(sessions.length, 10)})
+              </button>
+
+              {showHistory && sessions.length > 0 && (
+                <div className="absolute right-0 top-full mt-2 w-96 border border-border bg-background shadow-lg z-50">
+                  <div className="max-h-96 overflow-y-auto">
+                    {sessions.slice(0, 10).map((session, idx) => (
+                      <button
+                        key={session.id}
+                        onClick={() => resumeSession(session.id)}
+                        className="w-full grid grid-cols-[auto_1fr_auto] gap-4 items-center px-4 py-4 text-left hover:bg-muted transition-colors border-b border-border last:border-b-0"
+                      >
+                        <span className="text-xs font-semibold text-muted-foreground">
+                          {String(idx + 1).padStart(2, '0')}
+                        </span>
+                        <span className="text-sm text-foreground truncate">
+                          {session.last_query || '(Untitled)'}
+                        </span>
+                        <span className="text-xs text-muted-foreground whitespace-nowrap">
+                          {formatTime(session.update_time)}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
 
           {/* AI Analysis */}
           {(aiAnalysis || isLoading) && (
@@ -296,13 +366,56 @@ export function SearchInterface() {
     <section className="min-h-[calc(100vh-4rem)] flex items-center py-24">
       <div className="container mx-auto px-8">
         <div className="max-w-3xl mx-auto">
-          {/* Hero title */}
-          <h1 className="text-5xl font-black tracking-tight leading-tight mb-4">
-            Find Your Car
-          </h1>
-          <p className="text-lg text-muted-foreground mb-16">
-            AI-powered intelligent search system
-          </p>
+          {/* Header with History Dropdown */}
+          <div className="flex justify-between items-start mb-8">
+            <div>
+              <h1 className="text-5xl font-black tracking-tight leading-tight mb-4">
+                Find Your Car
+              </h1>
+              <p className="text-lg text-muted-foreground">
+                AI-powered intelligent search system
+              </p>
+            </div>
+
+            {/* History Dropdown */}
+            {sessions.length > 0 && (
+              <div className="relative" ref={historyRef}>
+                <button
+                  onClick={() => setShowHistory(!showHistory)}
+                  className="px-6 py-3 border border-border bg-transparent text-sm text-foreground hover:bg-foreground hover:text-background transition-all flex items-center gap-2"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  History ({Math.min(sessions.length, 10)})
+                </button>
+
+                {showHistory && (
+                  <div className="absolute right-0 top-full mt-2 w-96 border border-border bg-background shadow-lg z-50">
+                    <div className="max-h-96 overflow-y-auto">
+                      {sessions.slice(0, 10).map((session, idx) => (
+                        <button
+                          key={session.id}
+                          onClick={() => resumeSession(session.id)}
+                          className="w-full grid grid-cols-[auto_1fr_auto] gap-4 items-center px-4 py-4 text-left hover:bg-muted transition-colors border-b border-border last:border-b-0"
+                        >
+                          <span className="text-xs font-semibold text-muted-foreground">
+                            {String(idx + 1).padStart(2, '0')}
+                          </span>
+                          <span className="text-sm text-foreground truncate">
+                            {session.last_query || '(Untitled)'}
+                          </span>
+                          <span className="text-xs text-muted-foreground whitespace-nowrap">
+                            {formatTime(session.update_time)}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
 
           {/* Search box */}
           <div className={cn(
@@ -328,7 +441,7 @@ export function SearchInterface() {
           </div>
 
           {/* Quick tags */}
-          <div className="flex gap-2 flex-wrap mb-24">
+          <div className="flex gap-2 flex-wrap">
             {quickTags.map(tag => (
               <button
                 key={tag.id}
@@ -340,35 +453,6 @@ export function SearchInterface() {
               </button>
             ))}
           </div>
-
-          {/* History */}
-          {sessions.length > 0 && (
-            <div className="mt-24 pt-24 border-t border-border">
-              <h2 className="text-sm font-semibold tracking-widest uppercase mb-8 text-muted-foreground">
-                Recent Searches
-              </h2>
-
-              <div className="grid gap-px bg-border border border-border">
-                {sessions.slice(0, 6).map((session, idx) => (
-                  <button
-                    key={session.id}
-                    onClick={() => resumeSession(session.id)}
-                    className="grid grid-cols-[auto_1fr_auto] gap-4 items-center px-6 py-6 bg-background text-left hover:bg-muted transition-colors"
-                  >
-                    <span className="text-xs font-semibold text-muted-foreground">
-                      {String(idx + 1).padStart(2, '0')}
-                    </span>
-                    <span className="text-sm text-foreground truncate">
-                      {session.last_query || '(Untitled)'}
-                    </span>
-                    <span className="text-xs text-muted-foreground">
-                      {formatTime(session.update_time)}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
         </div>
       </div>
     </section>
