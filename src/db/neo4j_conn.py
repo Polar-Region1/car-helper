@@ -1,60 +1,78 @@
-
-
 import logging
 import threading
+
 from neo4j import GraphDatabase
+
+from src.config import NEO4J_PASSWORD, NEO4J_URI, NEO4J_USER
+
 
 logger = logging.getLogger(__name__)
 
 
-class Neo4jConnectionError(Exception):
-    pass
+class Neo4jConnectionError(RuntimeError):
+    """Raised when the Neo4j driver cannot be created or used."""
 
 
 class Neo4jConnection:
+    """Process-wide, thread-safe Neo4j driver holder."""
+
     _instance = None
     _lock = threading.Lock()
 
-    def __new__(cls, url="bolt://localhost", username="neo4j", password="12345678"):
+    def __new__(cls, url=None, username=None, password=None):
         if cls._instance is None:
             with cls._lock:
                 if cls._instance is None:
                     instance = super().__new__(cls)
+                    resolved_url = url or NEO4J_URI
+                    resolved_user = username or NEO4J_USER
+                    resolved_password = password or NEO4J_PASSWORD
+                    if not resolved_password:
+                        raise Neo4jConnectionError("缺少 NEO4J_PASSWORD，请在 .env 中配置。")
                     try:
-                        instance.driver = GraphDatabase.driver(url, auth=(username, password))
-                        instance.driver.verify_connectivity()
-                    except Exception as e:
-                        logger.error("Neo4j 连接失败: %s", e)
-                        raise Neo4jConnectionError(
-                            f"无法连接 Neo4j ({url})，请检查数据库是否启动。详情: {e}"
+                        instance.driver = GraphDatabase.driver(
+                            resolved_url,
+                            auth=(resolved_user, resolved_password),
                         )
+                        instance.driver.verify_connectivity()
+                    except Neo4jConnectionError:
+                        raise
+                    except Exception as exc:
+                        logger.error("Neo4j connection failed: %s", exc)
+                        raise Neo4jConnectionError(
+                            f"无法连接 Neo4j（{resolved_url}），请检查数据库是否启动。"
+                        ) from exc
                     cls._instance = instance
         return cls._instance
 
-    def ensure_indexes(self):
-        indexes = [
-            "CREATE INDEX index_brand_name IF NOT EXISTS FOR (b:品牌) ON (b.name)",
-            "CREATE INDEX index_price_name IF NOT EXISTS FOR (p:价格区间) ON (p.name)",
-            "CREATE INDEX index_energy_name IF NOT EXISTS FOR (e:能源类型) ON (e.name)",
-        ]
-        try:
-            with self.get_session() as session:
-                for cypher in indexes:
-                    session.run(cypher)
-        except Exception as e:
-            logger.warning("索引创建失败(非致命): %s", e)
+    @classmethod
+    def close_if_initialized(cls):
+        with cls._lock:
+            instance = cls._instance
+            cls._instance = None
+        if instance is not None:
+            try:
+                instance.driver.close()
+            except Exception:
+                logger.exception("Failed to close Neo4j driver")
 
     def get_session(self):
         try:
             return self.driver.session()
-        except Exception as e:
-            logger.error("获取 Neo4j session 失败: %s", e)
-            raise Neo4jConnectionError(f"数据库会话不可用，请稍后重试。详情: {e}")
+        except Exception as exc:
+            logger.error("Failed to create Neo4j session: %s", exc)
+            raise Neo4jConnectionError("数据库会话不可用，请稍后重试。") from exc
+
+    def ensure_indexes(self):
+        """Create optional lookup indexes when explicitly invoked by maintenance code."""
+        statements = (
+            "CREATE INDEX index_brand_name IF NOT EXISTS FOR (b:品牌) ON (b.name)",
+            "CREATE INDEX index_price_name IF NOT EXISTS FOR (p:价格区间) ON (p.name)",
+            "CREATE INDEX index_energy_name IF NOT EXISTS FOR (e:能源类型) ON (e.name)",
+        )
+        with self.get_session() as session:
+            for statement in statements:
+                session.run(statement).consume()
 
     def close(self):
-        try:
-            self.driver.close()
-        except Exception:
-            pass
-        finally:
-            Neo4jConnection._instance = None
+        self.close_if_initialized()

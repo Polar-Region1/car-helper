@@ -1,332 +1,162 @@
-# 🚗 Car Helper - 智能汽车推荐Agent
+# Car Helper
 
-基于 **LangGraph + Neo4j知识图谱** 的智能选车助手，通过自然语言对话帮助用户找到理想车型。
+Car Helper 是一个本地优先的汽车知识图谱问答 Agent。用户用自然语言描述预算、能源类型、车型级别或品牌，DeepSeek 选择受约束的查询工具，从 Neo4j 获取结构化车型数据，并可通过 Tavily 补充口碑、新闻和优惠等时效信息。
 
-[![Python](https://img.shields.io/badge/Python-3.12-blue.svg)](https://www.python.org/)
-[![LangGraph](https://img.shields.io/badge/LangGraph-Latest-green.svg)](https://github.com/langchain-ai/langgraph)
-[![Neo4j](https://img.shields.io/badge/Neo4j-5.x-008CC1.svg)](https://neo4j.com/)
-[![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+这个项目当前是知识图谱增强的问答系统，不包含用户画像、学习排序或独立推荐评分模型。
 
-## ✨ 核心亮点
+## 架构
 
-### 📊 规模与性能
-- **40,912** 条车型数据 | **636** 个品牌 | **7,077** 个车系
-- **P95响应 <100ms**（所有查询工具，最快1.3ms）
-- **34** 条自动化测试，核心工具层覆盖率 **93%**
-
-### 🧠 技术创新
-- **参数化Cypher设计** — LLM只填参数不生成查询，零SQL注入风险，零查询幻觉
-- **四维贪心采样算法** — 品牌/能源/价格/时间四维度覆盖，能源覆盖率比随机采样高 **97%**
-- **DeepSeek Thinking Mode适配** — 首创LangGraph框架下的reasoning内容全生命周期保全方案
-- **三级查询复杂度分级** — 简单查询快速响应，复杂查询多步推理，复合查询融合网络搜索
-
-### 🛠️ 架构特性
-- 🔍 **知识图谱** — Neo4j存储结构化车型数据，快速多维度查询
-- 🌐 **网络搜索** — Tavily集成，补充口碑/评测等非结构化信息
-- 💬 **流式输出** — FastAPI + SSE实时推送，支持reasoning过程可视化
-- 💾 **会话持久化** — PostgreSQL存储对话历史，支持跨会话恢复
-- 🧪 **工程化** — pytest测试 + 异步架构 + 错误降级处理
-
----
-
-## 🚀 快速开始
-
-### 环境要求
-- Python 3.12
-- Neo4j 5.x（运行在 `bolt://localhost:7687`）
-- PostgreSQL（运行在 `localhost:5432`）
-
-### 安装依赖
-
-```bash
-git clone https://github.com/Polar-Region1/car-helper.git
-cd car-helper
-pip install -r requirements.txt
+```text
+React / CLI
+    │
+    ├─ FastAPI + SSE
+    │       │
+    │       └─ LangChain Agent + DeepSeek
+    │               ├─ 参数化 Neo4j 查询工具
+    │               └─ Tavily 网络搜索
+    │
+    ├─ PostgreSQL：LangGraph 短期会话 checkpoint
+    └─ SQLite：本地用户身份、会话目录和可控长期记忆
 ```
 
-### 配置环境变量
+后端只创建一个 Agent、一个 PostgreSQL 连接池和一个 checkpointer。不同会话通过 LangGraph `thread_id` 隔离，同一会话的并发请求会串行处理。网页端在同一 `thread_id` 下保留完整消息列表，每轮回答仍通过 SSE 增量显示。
 
-创建 `.env` 文件：
+系统首次启动会在 `var/car_helper.db` 创建一个本地用户 UUID。SQLite 只保存本地身份、会话目录和用户明确要求记住的稳定偏好；短期对话正文仍由 PostgreSQL checkpoint 保存。网页右上角的“记忆”面板可查看、修改和逐条删除长期记忆。当前预算、给他人选车、本轮候选等临时条件不会自动写入长期记忆。
+
+## 环境
+
+- Python 3.12
+- Node.js 20+
+- Neo4j 5+
+- PostgreSQL
+- DeepSeek API Key
+- Tavily API Key（仅网络搜索需要）
+
+本项目开发环境使用 `E:\Anaconda_envs\envs\langchain_v1\python.exe`。
+
+安装依赖：
+
+```powershell
+E:\Anaconda_envs\envs\langchain_v1\python.exe -m pip install -r requirements.txt
+cd frontend
+npm install
+```
+
+在项目根目录创建 `.env`，至少配置：
 
 ```env
-DEEPSEEK_API_KEY=your_deepseek_api_key
-TAVILY_API_KEY=your_tavily_api_key
+DEEPSEEK_API_KEY=...
+DEEPSEEK_BASE_URL=https://api.deepseek.com
+TAVILY_API_KEY=...
 NEO4J_URI=bolt://localhost:7687
 NEO4J_USER=neo4j
-NEO4J_PASSWORD=your_password
+NEO4J_PASSWORD=...
 DB_URI=postgresql://user:password@localhost:5432/car_helper_sessions
+LOCAL_DB_PATH=var/car_helper.db
 ```
 
-### 导入数据到Neo4j
+`.env` 已被 Git 忽略。不要提交密钥或数据库密码。
 
-```bash
-cd src/pipeline/data_import
-python store_data_to_neo4j.py
-python insert_data_to_neo4j.py
+## 启动
+
+开发模式需要两个进程：Vite 在 3000 端口提供热更新页面，并将 `/api` 代理到 7860 端口的 FastAPI。
+
+```powershell
+E:\Anaconda_envs\envs\langchain_v1\python.exe -m src.api
+cd frontend
+npm run dev
 ```
 
-### 启动Web服务
+访问 `http://localhost:3000`。
 
-```bash
-python -m src.api
-# 访问 http://localhost:7860
+生产模式只需要 FastAPI 一个进程。React 构建产物由 FastAPI 托管，3000 端口不再使用：
+
+```powershell
+cd frontend
+npm run build
+cd ..
+E:\Anaconda_envs\envs\langchain_v1\python.exe -m src.api
 ```
 
-### 或使用命令行交互
+访问 `http://127.0.0.1:7860`。未加入用户认证前，后端默认只监听本机地址，不应直接暴露到公网。
 
-```bash
-python -m src.agent
+命令行入口：
+
+```powershell
+E:\Anaconda_envs\envs\langchain_v1\python.exe -m src.agent
 ```
 
----
+CLI 支持 `/resume` 恢复会话和 `/exit` 退出。
 
-## 📐 系统架构
+## 数据导入
 
-```
-┌─────────────────┐
-│   用户输入      │
-│  "推荐一款     │
-│   新能源SUV"   │
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────────────────────────┐
-│      LangGraph Agent               │
-│  ┌──────────────────────────────┐  │
-│  │  三级查询复杂度分级策略      │  │
-│  │  简单→复杂→复合              │  │
-│  └──────────────────────────────┘  │
-└──────┬────────────────────┬─────────┘
-       │                    │
-       ▼                    ▼
-┌──────────────┐    ┌──────────────┐
-│ Neo4j查询    │    │ Tavily搜索   │
-│ 7个参数化工具│    │ 网络补充     │
-│ P95<100ms    │    │ 口碑/评测    │
-└──────┬───────┘    └──────┬───────┘
-       │                    │
-       └──────────┬─────────┘
-                  ▼
-          ┌──────────────┐
-          │ 四维贪心采样 │
-          │ 500→20条     │
-          │ 能源覆盖+97% │
-          └──────┬───────┘
-                 ▼
-         ┌───────────────┐
-         │  流式输出结果  │
-         │  FastAPI+SSE  │
-         └───────────────┘
+车型原始数据不随代码仓库发布，并已被 Git 忽略。运行导入器前，需要在本地准备 `src/pipeline/entities/` 和 `src/pipeline/relationships/`；所需文件名、字段和校验规则以 `src/pipeline/data_import/import_data.py` 为准。
+
+导入器默认只校验本地数据，不连接或修改数据库：
+
+```powershell
+E:\Anaconda_envs\envs\langchain_v1\python.exe -m src.pipeline.data_import.import_data
 ```
 
----
+校验通过后执行幂等导入：
 
-## 🔧 核心组件
-
-### 1. 参数化查询工具（7个）
-
-| 工具 | 功能 | P95响应时间 |
-|------|------|------------|
-| `query_by_brand` | 品牌查询 | 16.1ms |
-| `query_by_price_range` | 价格区间查询 | 53.2ms |
-| `query_by_energy_type` | 能源类型查询 | 38.0ms |
-| `query_by_conditions` | 多条件组合查询 | 52.4ms |
-| `compare_models` | 车型对比 | 10.9ms |
-| `query_by_maintenance_cost` | 保养成本查询 | 87.8ms |
-| `explore_schema` | 知识图谱探索 | 1.3ms |
-
-**设计原则**：固定Cypher模板 + 参数绑定，LLM只负责选工具和填参数，不生成查询语句。
-
-### 2. 四维贪心采样算法
-
-```python
-# 将500条结果压缩至20条，同时保证多样性
-def stratified_sample(records, max_count=20):
-    """
-    维度1: 品牌覆盖（占50%配额）
-    维度2: 能源类型覆盖
-    维度3: 价格区间覆盖
-    维度4: 上市时间填充（倒序）
-    """
+```powershell
+E:\Anaconda_envs\envs\langchain_v1\python.exe -m src.pipeline.data_import.import_data --apply
 ```
 
-**实测效果**：能源类型覆盖率比随机采样高 **97%**（5.0 vs 2.5）
+旧数据库没有新版 `_source_id`，首次迁移需要明确替换全部图数据：
 
-### 3. 三级查询复杂度分级
-
-- **简单查询**（单维度）→ 直接调工具，简洁回答
-- **复杂查询**（多条件/对比）→ 多步推理，结构化分析
-- **复合查询**（需网络补充）→ 先查图谱，再搜网络，融合输出
-
-### 4. DeepSeek Thinking Mode适配
-
-通过monkey-patch 4个 `langchain-openai` 内部函数，实现reasoning_content的：
-- ✅ 反序列化（from API response）
-- ✅ 序列化（to checkpoint）
-- ✅ 内容格式化（to UI）
-- ✅ 流式输出（SSE events）
-
----
-
-## 📊 性能基准
-
-### 查询性能（100次迭代测试）
-
-| 工具 | 平均耗时 | P50 | P95 | P99 |
-|------|---------|-----|-----|-----|
-| query_by_brand | 32.1ms | 10.8ms | 16.1ms | 2111.0ms |
-| query_by_price_range | 44.2ms | 42.5ms | 53.2ms | 77.3ms |
-| query_by_energy_type | 28.8ms | 28.5ms | 38.0ms | 56.7ms |
-| query_by_conditions | 46.3ms | 39.6ms | 52.4ms | 661.4ms |
-| compare_models | 8.6ms | 8.7ms | 10.9ms | 15.0ms |
-| query_by_maintenance_cost | 69.2ms | 69.8ms | 87.8ms | 92.2ms |
-| explore_schema | 0.8ms | 0.7ms | 1.3ms | 2.2ms |
-
-### 采样质量对比（50次迭代）
-
-| 维度 | 四维贪心 | 随机采样 | 提升 |
-|------|---------|---------|------|
-| 能源类型覆盖 | 5.0 | 2.5 | **+97%** |
-| 品牌覆盖 | 2.0 | 2.0 | - |
-
----
-
-## 🧪 测试
-
-### 运行全部测试
-
-```bash
-pytest tests/ -v
-# 32 passed (23工具级 + 2搜索 + 9 E2E)
+```powershell
+E:\Anaconda_envs\envs\langchain_v1\python.exe -m src.pipeline.data_import.import_data --apply --replace --confirm-replace
 ```
 
-### 测试覆盖率
+最后一条命令会删除现有 Neo4j 图数据。执行前必须自行完成备份和确认；应用启动和测试都不会自动创建索引或修改 Neo4j schema。
 
-```bash
-pytest --cov=src tests/
-# 核心工具层覆盖率: 93%
+## 测试
+
+确定性单元测试不访问网络或真实数据库：
+
+```powershell
+E:\Anaconda_envs\envs\langchain_v1\python.exe -m pytest tests/unit -v
 ```
 
-### 性能测试
+显式运行只读集成测试：
 
-```bash
-pytest tests/test_performance.py -v -s
+```powershell
+$env:RUN_INTEGRATION = "1"
+E:\Anaconda_envs\envs\langchain_v1\python.exe -m pytest tests/integration -v
 ```
 
-### 采样算法对比
+前端验证：
 
-```bash
-python scripts/sampling_comparison.py
+```powershell
+cd frontend
+npm run lint
+npm run build
 ```
 
----
+仓库不保存静态性能报告。性能数据必须由当前版本重新运行 `scripts/load_test.py` 和 `scripts/sampling_comparison.py` 后得出。
 
-## 📁 项目结构
+## 主要目录
 
-```
-car_helper/
-├── src/
-│   ├── agent.py              # Agent主入口（LLM + 工具注册）
-│   ├── api.py                # FastAPI + SSE Web后端
-│   ├── config.py             # 全局配置
-│   ├── session.py            # 会话管理（PostgreSQL持久化）
-│   ├── deepseek_patched.py   # DeepSeek thinking mode适配
-│   ├── db/
-│   │   └── neo4j_conn.py     # Neo4j线程安全单例连接
-│   ├── tools/
-│   │   ├── neo4j_tools.py    # 7个参数化Cypher工具 + 采样算法
-│   │   └── web_search.py     # Tavily搜索工具
-│   ├── prompts/
-│   │   ├── system_prompt.py  # 系统提示词（含分级策略）
-│   │   └── compress_prompt.py# 消息压缩提示词
-│   └── pipeline/
-│       └── data_import/       # Neo4j数据导入脚本
-├── tests/
-│   ├── test_neo4j_tools.py   # 23条工具级测试
-│   ├── test_web_search.py    # 2条搜索测试
-│   ├── test_e2e.py           # 9条端到端测试
-│   └── test_performance.py   # 性能基准测试
-├── scripts/
-│   ├── crawl.py              # 懂车帝数据爬虫
-│   ├── load_test.py          # FastAPI并发压测
-│   └── sampling_comparison.py # 采样算法对比
-└── benchmark_report.md       # 性能测试报告
+```text
+src/
+├─ agent.py                 CLI 入口
+├─ agent_factory.py         Agent、LLM 和工具注册
+├─ api.py                   FastAPI、SSE、会话接口、前端托管
+├─ config.py                环境配置
+├─ session.py               PostgreSQL checkpointer 与 CLI 会话恢复入口
+├─ storage/                 SQLite 本地身份、会话目录和长期记忆
+├─ memory/                  记忆上下文、提示词注入和受约束工具
+├─ db/                      Neo4j 连接
+├─ tools/                   车型查询和网络搜索工具
+├─ prompts/                 Agent 系统提示词
+└─ pipeline/data_import/    安全数据校验与导入
+
+frontend/                   React + TypeScript 前端
+tests/unit/                 隔离单元测试
+tests/integration/          显式外部服务测试
+scripts/                    压测与采样评估
 ```
 
----
-
-## 🎯 使用示例
-
-### 品牌查询
-```
-用户: 比亚迪有哪些纯电动车？
-Agent: [调用query_by_brand] 为您找到20款比亚迪车型...
-```
-
-### 多条件筛选
-```
-用户: 推荐一款10-20万的新能源SUV
-Agent: [调用query_by_conditions] 符合条件的车型有...
-```
-
-### 车型对比
-```
-用户: 对比几款热门SUV
-Agent: [调用compare_models] 为您对比以下车型...
-```
-
-### 网络搜索补充
-```
-用户: 汉EV的口碑怎么样？
-Agent: [调用web_search] 根据网络评测...
-```
-
----
-
-## 🛣️ 技术演进
-
-### V1.0（2026-04）
-- ✅ 基础Agent框架
-- ✅ Neo4j知识图谱构建
-- ✅ 7个参数化查询工具
-
-### V2.0（2026-05）
-- ✅ 四维贪心采样算法
-- ✅ 异步架构改造
-- ✅ 34条自动化测试
-- ✅ DeepSeek Thinking Mode适配
-- ✅ PostgreSQL会话持久化
-
-### V3.0（2026-05）
-- ✅ FastAPI + SSE Web服务
-- ✅ 引擎室风格前端界面
-- ✅ 性能基准测试
-
-### 未来规划
-- ⏳ 用户画像与个性化推荐
-- ⏳ 车型图片识别
-- ⏳ 多轮对话上下文优化
-- ⏳ 分布式部署与横向扩展
-
----
-
-## 📝 License
-
-MIT License
-
----
-
-## 👨‍💻 作者
-
-**lyl** - AI Agent开发者 / 算法研究者
-
-如有问题或建议，欢迎提Issue或PR！
-
----
-
-## 🙏 致谢
-
-- [LangGraph](https://github.com/langchain-ai/langgraph) - Agent编排框架
-- [Neo4j](https://neo4j.com/) - 图数据库
-- [DeepSeek](https://www.deepseek.com/) - 大语言模型
-- [Tavily](https://tavily.com/) - 搜索引擎API
+开发约束和安全规则见 `AGENTS.md`。

@@ -1,263 +1,250 @@
+import ast
 import asyncio
 import json
 import logging
-import os
+import re
 import sys
 import time
 from contextlib import asynccontextmanager
+from uuid import UUID
 
-# Windows: psycopg 异步必须用 SelectorEventLoop，但 uvicorn 在 Windows 上
-# 默认用 ProactorEventLoop，需要 patch 其 loop factory
 if sys.platform == "win32":
-    import uvicorn.loops.asyncio as _uvloop_asyncio
+    import uvicorn.loops.asyncio as _uvicorn_asyncio
 
-    _uvloop_asyncio.asyncio_loop_factory = lambda use_subprocess=False: asyncio.SelectorEventLoop
+    _uvicorn_asyncio.asyncio_loop_factory = (
+        lambda use_subprocess=False: asyncio.SelectorEventLoop
+    )
 
-sys.path.insert(0, os.path.dirname(__file__))
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-
-from fastapi import FastAPI, Request
-from fastapi.responses import StreamingResponse, FileResponse
-from fastapi.staticfiles import StaticFiles
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from langchain_openai import ChatOpenAI
-from langchain.agents import create_agent
-from langchain_core.messages import HumanMessage
+from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, Field
 
-from src.config import DEEPSEEK_API_KEY, DEEPSEEK_BASE_URL, DB_URI
+from src.agent_factory import create_agent_context, create_car_agent
+from src.config import APP_HOST, APP_PORT, CORS_ORIGINS, LOCAL_DB_PATH, PROJECT_ROOT
 from src.db.neo4j_conn import Neo4jConnection
-from src.deepseek_patched import apply_patches
-from src.session import create_unique_session_id, store_session_id, delete_session
-from src.tools.neo4j_tools import (
-    query_by_brand,
-    query_by_price_range,
-    query_by_energy_type,
-    query_by_conditions,
-    compare_models,
-    query_by_maintenance_cost,
-    explore_schema,
+from src.session import (
+    create_session_store,
+    create_unique_session_id,
 )
-from src.tools.web_search import web_search
-from src.prompts.system_prompt import SYSTEM_PROMPT
+from src.storage import MemoryValidationError, create_local_store
 
-apply_patches()
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
-# ─── LLM 初始化 ──────────────────────────────────────────
-llm = ChatOpenAI(
-    api_key=DEEPSEEK_API_KEY,
-    base_url=DEEPSEEK_BASE_URL,
-    model="deepseek-chat",
-    temperature=0.7,
-    extra_body={"thinking": {"type": "enabled"}},
-)
-
-tools = [
-    query_by_brand,
-    query_by_price_range,
-    query_by_energy_type,
-    query_by_conditions,
-    compare_models,
-    query_by_maintenance_cost,
-    explore_schema,
-    web_search,
-]
-
-# ─── Neo4j 索引 ──────────────────────────────────────────
-Neo4jConnection().ensure_indexes()
-
-# ─── 会话缓存 ────────────────────────────────────────────
-_agent_cache: dict[str, tuple] = {}
+SESSION_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{8,128}$")
+CAR_QUERY_TOOLS = {
+    "query_by_brand",
+    "query_by_price_range",
+    "query_by_energy_type",
+    "query_by_conditions",
+    "compare_models",
+    "query_by_maintenance_cost",
+}
 
 
-async def _get_or_create_agent(session_id: str):
-    if session_id in _agent_cache:
-        return _agent_cache[session_id]
-
-    from src.session import store_session_to_db
-    pool, checkpointer = await store_session_to_db()
-    agent = create_agent(
-        model=llm,
-        tools=tools,
-        system_prompt=SYSTEM_PROMPT,
-        checkpointer=checkpointer,
-    )
-    _agent_cache[session_id] = (pool, checkpointer, agent)
-    return pool, checkpointer, agent
+class ChatRequest(BaseModel):
+    message: str = Field(min_length=1, max_length=4000)
+    session_id: str | None = Field(default=None, max_length=128)
 
 
-async def _close_all_agents():
-    for pool, _, _ in _agent_cache.values():
+class MemoryUpdateRequest(BaseModel):
+    value: str = Field(min_length=1, max_length=500)
+
+
+def _validate_session_id(session_id):
+    if not SESSION_ID_PATTERN.fullmatch(session_id):
+        raise HTTPException(status_code=422, detail="Invalid session_id")
+    return session_id
+
+
+def _sse(data: dict, event: str = "message"):
+    payload = json.dumps(data, ensure_ascii=False, default=str)
+    return f"event: {event}\ndata: {payload}\n\n"
+
+
+def _unwrap_tool_result(result):
+    payload = getattr(result, "content", result)
+    if isinstance(payload, dict):
+        return payload
+    if not isinstance(payload, str):
+        return None
+    for parser in (json.loads, ast.literal_eval):
         try:
-            await pool.close()
-        except Exception:
-            pass
-    _agent_cache.clear()
+            parsed = parser(payload)
+        except (ValueError, SyntaxError, TypeError, json.JSONDecodeError):
+            continue
+        if isinstance(parsed, dict):
+            return parsed
+    return None
+
+
+def _extract_cars_from_result(result):
+    payload = _unwrap_tool_result(result)
+    if not payload or not isinstance(payload.get("数据"), list):
+        return []
+
+    cars = []
+    for item in payload["数据"][:20]:
+        if not isinstance(item, dict):
+            continue
+        name = " ".join(
+            str(item.get(field, "")).strip()
+            for field in ("品牌", "车系", "车型")
+            if item.get(field)
+        )
+        if not name:
+            continue
+        energy = item.get("能源类型") or "未知"
+        cars.append(
+            {
+                "name": name,
+                "price": item.get("指导价") or "暂无报价",
+                "energy": energy,
+                "level": item.get("级别") or "未知",
+                "badge": "新能源"
+                if any(keyword in str(energy) for keyword in ("纯电", "插电", "增程"))
+                else None,
+            }
+        )
+    return cars
+
+
+def _message_content_to_text(content):
+    if isinstance(content, str):
+        return content
+    if not isinstance(content, list):
+        return ""
+    parts = []
+    for block in content:
+        if isinstance(block, str):
+            parts.append(block)
+        elif isinstance(block, dict) and isinstance(block.get("text"), str):
+            parts.append(block["text"])
+    return "".join(parts)
+
+
+@asynccontextmanager
+async def _locked_session(app: FastAPI, session_id: str):
+    """Serialize a session while safely retiring unused per-session locks."""
+    async with app.state.session_locks_guard:
+        entry = app.state.session_locks.setdefault(
+            session_id,
+            {"lock": asyncio.Lock(), "users": 0},
+        )
+        entry["users"] += 1
+    try:
+        async with entry["lock"]:
+            yield
+    finally:
+        async with app.state.session_locks_guard:
+            entry["users"] -= 1
+            if entry["users"] == 0:
+                app.state.session_locks.pop(session_id, None)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    yield
-    await _close_all_agents()
+    local_store = await asyncio.to_thread(create_local_store, LOCAL_DB_PATH)
+    profile = await asyncio.to_thread(local_store.get_default_profile)
+    pool, checkpointer = await create_session_store()
+    try:
+        app.state.local_store = local_store
+        app.state.profile = profile
+        app.state.pool = pool
+        app.state.checkpointer = checkpointer
+        app.state.agent = create_car_agent(checkpointer=checkpointer)
+        app.state.session_locks = {}
+        app.state.session_locks_guard = asyncio.Lock()
+        yield
+    finally:
+        await pool.close()
+        Neo4jConnection.close_if_initialized()
 
 
 app = FastAPI(title="Car Helper API", lifespan=lifespan)
-
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=list(CORS_ORIGINS),
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "PATCH", "DELETE"],
+    allow_headers=["Content-Type"],
 )
-
-# 静态文件
-web_dir = os.path.join(os.path.dirname(__file__), "web")
-if os.path.isdir(web_dir):
-    app.mount("/static", StaticFiles(directory=web_dir), name="static")
-
-
-def _sse(data: dict, event: str = "message") -> str:
-    return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
-
-
-def _extract_cars_from_result(result_str: str) -> list:
-    """从工具返回结果中提取车型数据"""
-    import json
-
-    cars = []
-
-    try:
-        # 尝试直接解析JSON（工具返回的是字典转字符串）
-        result_dict = eval(result_str)  # 或用 ast.literal_eval
-
-        if isinstance(result_dict, dict) and "数据" in result_dict:
-            raw_data = result_dict["数据"]
-
-            for item in raw_data[:20]:  # 最多20个
-                try:
-                    name = f"{item.get('品牌', '')} {item.get('车系', '')} {item.get('车型', '')}".strip()
-                    price = item.get('官方指导价', '暂无报价')
-                    energy = item.get('能源类型', '未知')
-                    level = item.get('级别', '未知')
-
-                    # 简单判断badge
-                    badge = None
-                    if '新能源' in energy or '纯电' in energy:
-                        badge = '新能源'
-
-                    cars.append({
-                        "name": name,
-                        "price": price,
-                        "energy": energy,
-                        "level": level,
-                        "badge": badge
-                    })
-                except Exception as e:
-                    logger.debug(f"Failed to parse car item: {e}")
-                    continue
-
-    except Exception as e:
-        logger.debug(f"Failed to parse result as dict: {e}")
-
-    return cars
 
 
 @app.post("/api/chat")
-async def chat_stream(request: Request):
-    body = await request.json()
-    message = body.get("message", "").strip()
-    session_id = body.get("session_id", "")
-    if not session_id:
-        session_id = create_unique_session_id()
-
+async def chat_stream(payload: ChatRequest, request: Request):
+    message = payload.message.strip()
     if not message:
-        return StreamingResponse(
-            iter([_sse({"message": "消息不能为空"}, "error")]),
-            media_type="text/event-stream",
-        )
+        raise HTTPException(status_code=422, detail="Message cannot be blank")
+    session_id = _validate_session_id(payload.session_id or create_unique_session_id())
 
     async def event_generator():
-        start_time = time.time()
+        start_time = time.perf_counter()
         yield _sse({"session_id": session_id}, "connected")
-        # 让 SSE header 先发出去
-        await asyncio.sleep(0)
 
         try:
-            pool, checkpointer, agent = await _get_or_create_agent(session_id)
-            config = {"configurable": {"thread_id": session_id}}
+            async with _locked_session(request.app, session_id):
+                profile_id = request.app.state.profile["profile_id"]
+                await asyncio.to_thread(
+                    request.app.state.local_store.upsert_conversation,
+                    profile_id,
+                    session_id,
+                    message,
+                )
+                agent_context = await asyncio.to_thread(
+                    create_agent_context,
+                    local_store=request.app.state.local_store,
+                    profile_id=profile_id,
+                    thread_id=session_id,
+                )
+                config = {"configurable": {"thread_id": session_id}}
+                async for event in request.app.state.agent.astream_events(
+                    {"messages": [{"role": "user", "content": message}]},
+                    config=config,
+                    context=agent_context,
+                    version="v2",
+                ):
+                    if await request.is_disconnected():
+                        logger.info("Client disconnected from session %s", session_id)
+                        return
 
-            store_session_id(session_id, message)
+                    kind = event.get("event")
+                    if kind == "on_tool_start":
+                        yield _sse({"tool_name": event.get("name", "")}, "tool_start")
+                    elif kind == "on_tool_end":
+                        tool_name = event.get("name", "")
+                        result = event.get("data", {}).get("output")
+                        result_payload = _unwrap_tool_result(result) or {}
+                        count = len(result_payload.get("数据", []))
+                        yield _sse(
+                            {"tool_name": tool_name, "result_count": count},
+                            "tool_end",
+                        )
+                        if tool_name in CAR_QUERY_TOOLS:
+                            cars = _extract_cars_from_result(result)
+                            if cars:
+                                yield _sse({"cars": cars}, "cars_data")
+                    elif kind == "on_chat_model_stream":
+                        chunk = event.get("data", {}).get("chunk")
+                        if chunk is None:
+                            continue
+                        reasoning = chunk.additional_kwargs.get("reasoning_content")
+                        if reasoning:
+                            yield _sse({"text": str(reasoning)}, "reasoning")
+                        content = _message_content_to_text(chunk.content)
+                        if content:
+                            yield _sse({"text": content}, "content")
 
-            reasoning_started = False
-            content_started = False
-
-            async for event in agent.astream_events(
-                {"messages": [{"role": "user", "content": message}]},
-                config=config,
-                version="v2",
-            ):
-                kind = event["event"]
-
-                if kind == "on_tool_start":
-                    tool_name = event.get("name", "")
-                    yield _sse({"tool_name": tool_name}, "tool_start")
-                    await asyncio.sleep(0)
-
-                elif kind == "on_tool_end":
-                    tool_name = event.get("name", "")
-                    result = event.get("data", {}).get("output")
-                    try:
-                        if hasattr(result, "__dict__"):
-                            result_str = str(result)
-                        else:
-                            result_str = result
-                    except Exception:
-                        result_str = str(result)
-
-                    yield _sse(
-                        {"tool_name": tool_name, "result": result_str},
-                        "tool_end",
-                    )
-
-                    # 如果是车型查询工具，尝试提取结构化数据
-                    if tool_name in ["query_by_brand", "query_by_price_range", "query_by_energy_type", "query_by_conditions"]:
-                        try:
-                            # 尝试解析工具返回的结果为车型列表
-                            cars_data = _extract_cars_from_result(result_str)
-                            if cars_data:
-                                yield _sse({"cars": cars_data}, "cars_data")
-                        except Exception as e:
-                            logger.debug(f"Failed to extract cars data: {e}")
-
-                    await asyncio.sleep(0)
-
-                elif kind == "on_chat_model_stream":
-                    chunk = event["data"]["chunk"]
-
-                    reasoning = chunk.additional_kwargs.get("reasoning_content")
-                    if reasoning:
-                        if not reasoning_started:
-                            reasoning_started = True
-                        yield _sse({"text": reasoning}, "reasoning")
-                        await asyncio.sleep(0)
-
-                    if chunk.content:
-                        if reasoning_started and not content_started:
-                            content_started = True
-                        elif not content_started:
-                            content_started = True
-                        yield _sse({"text": chunk.content}, "content")
-                        await asyncio.sleep(0)
-
-            elapsed = round((time.time() - start_time) * 1000)
-            yield _sse({"elapsed_ms": elapsed}, "done")
-
-        except Exception as e:
-            logger.error("SSE error: %s", e, exc_info=True)
-            yield _sse({"message": f"服务内部错误: {e}"}, "error")
+                elapsed = round((time.perf_counter() - start_time) * 1000)
+                yield _sse({"elapsed_ms": elapsed}, "done")
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("SSE request failed for session %s", session_id)
+            yield _sse({"message": "服务暂时不可用，请稍后重试。"}, "error")
 
     return StreamingResponse(
         event_generator(),
@@ -271,86 +258,139 @@ async def chat_stream(request: Request):
 
 
 @app.get("/api/sessions")
-async def list_sessions():
-    """列出本地 session_id.json 中的会话历史"""
-    from src.session import _read_from_json
+async def get_sessions(request: Request):
+    sessions = await asyncio.to_thread(
+        request.app.state.local_store.list_conversations,
+        request.app.state.profile["profile_id"],
+    )
+    return {"sessions": sessions}
+
+
+@app.get("/api/profile")
+async def get_profile(request: Request):
+    return request.app.state.profile
+
+
+@app.get("/api/memories")
+async def get_memories(request: Request):
+    memories = await asyncio.to_thread(
+        request.app.state.local_store.list_memories,
+        request.app.state.profile["profile_id"],
+    )
+    return {"memories": memories}
+
+
+@app.patch("/api/memories/{memory_id}")
+async def update_memory(
+    memory_id: UUID,
+    payload: MemoryUpdateRequest,
+    request: Request,
+):
     try:
-        data = _read_from_json()
-        sessions = []
-        for sid in data.get("session_ids", []):
-            info = data.get(sid, {})
-            sessions.append({
-                "id": sid,
-                "last_query": info.get("last_query", ""),
-                "create_time": info.get("create_time", ""),
-                "update_time": info.get("update_time", ""),
-            })
-        sessions.sort(key=lambda x: x["update_time"], reverse=True)
-        return {"sessions": sessions}
-    except Exception:
-        return {"sessions": []}
+        memory = await asyncio.to_thread(
+            request.app.state.local_store.update_memory,
+            request.app.state.profile["profile_id"],
+            str(memory_id),
+            value=payload.value,
+        )
+    except MemoryValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if memory is None:
+        raise HTTPException(status_code=404, detail="Memory not found")
+    return memory
+
+
+@app.delete("/api/memories/{memory_id}")
+async def remove_memory(memory_id: UUID, request: Request):
+    deleted = await asyncio.to_thread(
+        request.app.state.local_store.forget,
+        request.app.state.profile["profile_id"],
+        memory_id=str(memory_id),
+    )
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Memory not found")
+    return {"ok": True}
 
 
 @app.get("/api/sessions/{session_id}/messages")
-async def get_session_messages(session_id: str):
-    """从 PostgreSQL checkpointer 恢复指定会话的消息历史"""
-    from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
-    from psycopg_pool import AsyncConnectionPool
-
-    pool = None
+async def get_session_messages(session_id: str, request: Request):
+    _validate_session_id(session_id)
+    owns_session = await asyncio.to_thread(
+        request.app.state.local_store.owns_conversation,
+        request.app.state.profile["profile_id"],
+        session_id,
+    )
+    if not owns_session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    config = {"configurable": {"thread_id": session_id}}
     try:
-        pool = AsyncConnectionPool(
-            conninfo=DB_URI,
-            max_size=5,
-            kwargs={"autocommit": True, "prepare_threshold": 0},
-            open=False,
-        )
-        await pool.open()
-        checkpointer = AsyncPostgresSaver(pool)
-        config = {"configurable": {"thread_id": session_id}}
-        checkpoint_tuple = await checkpointer.aget_tuple(config)
+        checkpoint_tuple = await request.app.state.checkpointer.aget_tuple(config)
+    except Exception:
+        logger.exception("Failed to load session %s", session_id)
+        raise HTTPException(status_code=503, detail="Session store unavailable")
+    if not checkpoint_tuple or not checkpoint_tuple.checkpoint:
+        return {"messages": []}
 
-        if not checkpoint_tuple or not checkpoint_tuple.checkpoint:
-            return {"messages": []}
-
-        channels = checkpoint_tuple.checkpoint.get("channel_values", {})
-        raw_messages = channels.get("messages", [])
-
-        messages = []
-        for msg in raw_messages:
-            msg_type = getattr(msg, "type", None) or msg.get("type", "")
-            content = getattr(msg, "content", None) or msg.get("content", "")
-            if msg_type in ("human", "ai") and content:
-                role = "user" if msg_type == "human" else "agent"
-                messages.append({"role": role, "content": content})
-
-        return {"messages": messages}
-    except Exception as e:
-        logger.error("load session messages error: %s", e, exc_info=True)
-        return {"messages": [], "error": str(e)}
-    finally:
-        if pool:
-            await pool.close()
+    raw_messages = checkpoint_tuple.checkpoint.get("channel_values", {}).get("messages", [])
+    messages = []
+    for message in raw_messages:
+        if isinstance(message, dict):
+            message_type = message.get("type", "")
+            content = message.get("content", "")
+        else:
+            message_type = getattr(message, "type", "")
+            content = getattr(message, "content", "")
+        text = _message_content_to_text(content)
+        if message_type in {"human", "ai"} and text:
+            messages.append(
+                {"role": "user" if message_type == "human" else "agent", "content": text}
+            )
+    return {"messages": messages}
 
 
 @app.delete("/api/sessions/{session_id}")
-async def remove_session(session_id: str):
-    """删除指定会话（本地 JSON + agent 缓存）"""
-    _agent_cache.pop(session_id, None)
-    deleted = delete_session(session_id)
-    if deleted:
-        return {"ok": True}
-    return {"ok": False, "detail": "Session not found"}
+async def remove_session(session_id: str, request: Request):
+    _validate_session_id(session_id)
+    async with _locked_session(request.app, session_id):
+        owns_session = await asyncio.to_thread(
+            request.app.state.local_store.owns_conversation,
+            request.app.state.profile["profile_id"],
+            session_id,
+        )
+        if not owns_session:
+            raise HTTPException(status_code=404, detail="Session not found")
+        try:
+            await request.app.state.checkpointer.adelete_thread(session_id)
+        except Exception:
+            logger.exception("Failed to delete checkpoint for session %s", session_id)
+            raise HTTPException(status_code=503, detail="Session store unavailable")
+        await asyncio.to_thread(
+            request.app.state.local_store.delete_conversation,
+            request.app.state.profile["profile_id"],
+            session_id,
+        )
+    return {"ok": True}
 
 
-@app.get("/")
-async def serve_index():
-    index_path = os.path.join(web_dir, "index.html")
-    if os.path.exists(index_path):
-        return FileResponse(index_path)
-    return {"message": "Car Helper API is running."}
+FRONTEND_DIST = PROJECT_ROOT / "frontend" / "dist"
+ASSETS_DIR = FRONTEND_DIST / "assets"
+if ASSETS_DIR.is_dir():
+    app.mount("/assets", StaticFiles(directory=ASSETS_DIR), name="frontend-assets")
+
+
+@app.get("/{path:path}", include_in_schema=False)
+async def serve_frontend(path: str):
+    if not FRONTEND_DIST.is_dir():
+        return {
+            "message": "Car Helper API is running; build frontend/ to serve the web UI."
+        }
+    requested = (FRONTEND_DIST / path).resolve()
+    if requested.is_relative_to(FRONTEND_DIST.resolve()) and requested.is_file():
+        return FileResponse(requested)
+    return FileResponse(FRONTEND_DIST / "index.html")
 
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=7860, log_level="info")
+
+    uvicorn.run(app, host=APP_HOST, port=APP_PORT, log_level="info")

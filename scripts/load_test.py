@@ -1,151 +1,114 @@
-"""
-FastAPI SSE 并发压测
-模拟多用户同时发送消息，测试并发能力
-"""
+"""Concurrent SSE load test for a running local Car Helper API."""
+
+import argparse
 import asyncio
-import aiohttp
-import time
-from typing import List, Dict
+import codecs
+import json
+import math
 import statistics
+import time
+
+import aiohttp
 
 
-async def send_message(session: aiohttp.ClientSession, user_id: int, message: str) -> Dict:
-    """模拟单个用户发送消息"""
-    url = "http://localhost:7860/api/chat"
+def _parse_sse(raw):
+    event = "message"
+    data = []
+    for line in raw.splitlines():
+        if line.startswith("event:"):
+            event = line[6:].strip()
+        elif line.startswith("data:"):
+            data.append(line[5:].strip())
+    if not data:
+        return event, {}
+    return event, json.loads("\n".join(data))
 
-    start_time = time.perf_counter()
-    success = False
-    error_msg = None
-    chunks_received = 0
+
+async def send_message(session, base_url, user_id, message, timeout):
+    started = time.perf_counter()
+    events = []
+    error = None
+    buffer = ""
+    decoder = codecs.getincrementaldecoder("utf-8")()
+
+    def consume_text(text, *, final=False):
+        nonlocal buffer, error
+        buffer += text.replace("\r\n", "\n")
+        frames = buffer.split("\n\n")
+        buffer = frames.pop()
+        if final and buffer.strip():
+            frames.append(buffer)
+            buffer = ""
+        for frame in frames:
+            event, payload = _parse_sse(frame)
+            events.append(event)
+            if event == "error":
+                error = payload.get("message", "SSE error")
 
     try:
         async with session.post(
-            url,
-            json={"message": message, "session_id": f"load_test_user_{user_id}"},
-            timeout=aiohttp.ClientTimeout(total=60)
+            f"{base_url}/api/chat",
+            json={"message": message, "session_id": f"load_test_{user_id:04d}"},
+            timeout=aiohttp.ClientTimeout(total=timeout),
         ) as response:
-            if response.status == 200:
-                async for line in response.content:
-                    if line:
-                        chunks_received += 1
-                success = True
+            if response.status != 200:
+                error = f"HTTP {response.status}"
             else:
-                error_msg = f"HTTP {response.status}"
-    except asyncio.TimeoutError:
-        error_msg = "Timeout"
-    except Exception as e:
-        error_msg = str(e)
+                async for chunk in response.content.iter_any():
+                    consume_text(decoder.decode(chunk))
+                consume_text(decoder.decode(b"", final=True), final=True)
+    except TimeoutError:
+        error = "timeout"
+    except Exception as exc:
+        error = type(exc).__name__
 
-    elapsed = time.perf_counter() - start_time
-
-    return {
-        'user_id': user_id,
-        'success': success,
-        'elapsed': elapsed,
-        'chunks': chunks_received,
-        'error': error_msg
-    }
+    elapsed = time.perf_counter() - started
+    success = error is None and "done" in events and "content" in events
+    return {"success": success, "elapsed": elapsed, "error": error, "events": events}
 
 
-async def run_concurrent_test(num_users: int, message: str):
-    """运行并发测试"""
-    print(f"\n{'='*60}")
-    print(f"并发压测: {num_users} 用户")
-    print(f"测试消息: {message}")
-    print(f"{'='*60}\n")
-
+async def run(args):
     async with aiohttp.ClientSession() as session:
-        tasks = [
-            send_message(session, i, message)
-            for i in range(num_users)
-        ]
+        results = await asyncio.gather(
+            *(
+                send_message(session, args.url, index, args.message, args.timeout)
+                for index in range(args.users)
+            )
+        )
 
-        start_time = time.perf_counter()
-        results = await asyncio.gather(*tasks)
-        total_time = time.perf_counter() - start_time
-
-    # 统计结果
-    success_count = sum(1 for r in results if r['success'])
-    failed_count = num_users - success_count
-    success_rate = (success_count / num_users) * 100
-
-    response_times = [r['elapsed'] for r in results if r['success']]
-
-    if response_times:
-        response_times.sort()
-        avg_time = statistics.mean(response_times)
-        p50 = statistics.median(response_times)
-        p95 = response_times[int(len(response_times) * 0.95)] if len(response_times) > 1 else response_times[0]
-        p99 = response_times[int(len(response_times) * 0.99)] if len(response_times) > 1 else response_times[0]
-    else:
-        avg_time = p50 = p95 = p99 = 0
-
-    print(f"总耗时: {total_time:.2f}s")
-    print(f"成功请求: {success_count}/{num_users} ({success_rate:.1f}%)")
-    print(f"失败请求: {failed_count}")
-
-    if response_times:
-        print(f"\n响应时间统计:")
-        print(f"  平均: {avg_time:.2f}s")
-        print(f"  P50: {p50:.2f}s")
-        print(f"  P95: {p95:.2f}s")
-        print(f"  P99: {p99:.2f}s")
-
-    if failed_count > 0:
-        print(f"\n失败原因:")
-        errors = {}
-        for r in results:
-            if not r['success'] and r['error']:
-                errors[r['error']] = errors.get(r['error'], 0) + 1
-        for error, count in errors.items():
-            print(f"  {error}: {count}次")
-
-    return {
-        'num_users': num_users,
-        'success_rate': success_rate,
-        'total_time': round(total_time, 2),
-        'avg_response_time': round(avg_time, 2),
-        'p50': round(p50, 2),
-        'p95': round(p95, 2),
-        'p99': round(p99, 2),
+    successful = [result["elapsed"] for result in results if result["success"]]
+    failures = [result["error"] or "incomplete SSE" for result in results if not result["success"]]
+    report = {
+        "users": args.users,
+        "successes": len(successful),
+        "failures": len(failures),
+        "success_rate": round(len(successful) / args.users * 100, 2),
+        "average_seconds": round(statistics.mean(successful), 2) if successful else None,
+        "p95_seconds": round(sorted(successful)[math.ceil(len(successful) * 0.95) - 1], 2)
+        if successful
+        else None,
+        "errors": failures,
     }
+    print(json.dumps(report, ensure_ascii=False, indent=2))
+    if failures:
+        raise SystemExit(1)
 
 
-async def main():
-    """主测试流程"""
-    print("\n" + "="*60)
-    print("FastAPI SSE 并发压测")
-    print("="*60)
-    print("\n请确保 FastAPI 服务已启动 (python -m src.api)")
-    print("按 Enter 开始测试...")
-    input()
-
-    # 测试配置
-    test_configs = [
-        {'users': 5, 'message': '推荐一款10-20万的新能源车'},
-        {'users': 10, 'message': '比亚迪有哪些纯电动车？'},
-        {'users': 20, 'message': '对比几款热门SUV'},
-    ]
-
-    results = []
-
-    for config in test_configs:
-        result = await run_concurrent_test(config['users'], config['message'])
-        results.append(result)
-        await asyncio.sleep(3)  # 间隔3秒
-
-    # 汇总报告
-    print("\n" + "="*60)
-    print("压测汇总报告")
-    print("="*60)
-    print(f"{'并发数':>8} {'成功率':>10} {'总耗时':>10} {'平均响应':>10} {'P95':>8}")
-    print("-"*60)
-
-    for r in results:
-        print(f"{r['num_users']:>8} {r['success_rate']:>9.1f}% {r['total_time']:>9.1f}s {r['avg_response_time']:>9.1f}s {r['p95']:>7.1f}s")
-
-    print("="*60)
+def parse_args(argv=None):
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--url", default="http://127.0.0.1:7860")
+    parser.add_argument("--users", type=int, default=5)
+    parser.add_argument("--timeout", type=float, default=120)
+    parser.add_argument("--message", default="推荐一款10-20万的新能源车")
+    args = parser.parse_args(argv)
+    if not 1 <= args.users <= 100:
+        parser.error("--users 必须在 1 到 100 之间")
+    if args.timeout <= 0:
+        parser.error("--timeout 必须大于 0")
+    if not args.message.strip():
+        parser.error("--message 不能为空")
+    return args
 
 
-if __name__ == '__main__':
-    asyncio.run(main())
+if __name__ == "__main__":
+    asyncio.run(run(parse_args()))

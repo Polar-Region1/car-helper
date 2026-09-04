@@ -1,140 +1,98 @@
 import asyncio
 import sys
-import os
 
-sys.path.insert(0, os.path.dirname(__file__))
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-
-import nest_asyncio
-from langchain_openai import ChatOpenAI
-from langchain.agents import create_agent
-from langchain_core.messages import HumanMessage
-
-from src.config import DEEPSEEK_API_KEY, DEEPSEEK_BASE_URL
-from src.db.neo4j_conn import Neo4jConnection
-from src.deepseek_patched import apply_patches
-from src.session import create_unique_session_id, store_session_id, store_session_to_db, resume_session
-from src.tools.neo4j_tools import (
-    query_by_brand,
-    query_by_price_range,
-    query_by_energy_type,
-    query_by_conditions,
-    compare_models,
-    query_by_maintenance_cost,
-    explore_schema,
+from src.agent_factory import create_agent_context, create_car_agent
+from src.config import LOCAL_DB_PATH
+from src.session import (
+    create_session_store,
+    create_unique_session_id,
+    resume_session,
 )
-from src.tools.web_search import web_search
-from src.prompts.system_prompt import SYSTEM_PROMPT
+from src.storage import create_local_store
 
-nest_asyncio.apply()
 
-# ─── DeepSeek Thinking Mode 适配 ─────────────────────────
-apply_patches()
+async def stream_answer(agent, config, context, query):
+    print("\n🤖 Agent: ", end="", flush=True)
+    reasoning_started = False
+    content_started = False
 
-# ─── LLM 初始化（启用 thinking 模式）─────────────────────
-llm = ChatOpenAI(
-    api_key=DEEPSEEK_API_KEY,
-    base_url=DEEPSEEK_BASE_URL,
-    model="deepseek-chat",
-    temperature=0.7,
-    extra_body={"thinking": {"type": "enabled"}},
-)
+    async for event in agent.astream_events(
+        {"messages": [{"role": "user", "content": query}]},
+        config=config,
+        context=context,
+        version="v2",
+    ):
+        kind = event["event"]
+        if kind == "on_tool_start" and event.get("data", {}).get("input"):
+            print(f"\n🔧 正在调用工具：{event.get('name', '')} ...\n")
+        elif kind == "on_chat_model_stream":
+            chunk = event["data"]["chunk"]
+            reasoning = chunk.additional_kwargs.get("reasoning_content")
+            if reasoning:
+                if not reasoning_started:
+                    print("\n💭 思考过程：\n", flush=True)
+                    reasoning_started = True
+                print(reasoning, end="", flush=True)
+            if chunk.content:
+                if reasoning_started and not content_started:
+                    print("\n\n" + "=" * 40 + "\n", flush=True)
+                content_started = True
+                print(chunk.content, end="", flush=True)
 
-# ─── 工具注册 ────────────────────────────────────────────
-tools = [
-    query_by_brand,
-    query_by_price_range,
-    query_by_energy_type,
-    query_by_conditions,
-    compare_models,
-    query_by_maintenance_cost,
-    explore_schema,
-    web_search,
-]
-
-# ─── 会话管理 ────────────────────────────────────────────
-session_id = create_unique_session_id()
-
-# ─── Neo4j 索引初始化 ────────────────────────────────────
-Neo4jConnection().ensure_indexes()
+    print("\n" + "-" * 30)
 
 
 async def main():
-    # PostgreSQL 持久化
-    pool, checkpointer = await store_session_to_db()
-    config = {"configurable": {"thread_id": session_id}}
-
-    agent = create_agent(
-        model=llm,
-        tools=tools,
-        system_prompt=SYSTEM_PROMPT,
-        checkpointer=checkpointer,
-    )
-
+    session_id = create_unique_session_id()
+    local_store = await asyncio.to_thread(create_local_store, LOCAL_DB_PATH)
+    profile = await asyncio.to_thread(local_store.get_default_profile)
+    profile_id = profile["profile_id"]
+    pool, checkpointer = await create_session_store()
     try:
+        agent = create_car_agent(checkpointer=checkpointer)
         while True:
             query = await asyncio.to_thread(input, "USER_INPUT >>> ")
+            command = query.strip().lower()
 
-            if query.strip().lower() == "/exit":
-                # 退出前持久化最后一条提问
-                try:
-                    state = await agent.aget_state(config)
-                    messages = state.values.get("messages", [])
-                    for msg in reversed(messages):
-                        if isinstance(msg, HumanMessage):
-                            store_session_id(session_id, msg.content)
-                            break
-                except Exception:
-                    store_session_id(session_id, "(unknown)")
+            if command == "/exit":
                 print("会话已保存，再见！")
                 break
-
-            if query.strip().lower() == "/resume":
-                old_id = await asyncio.to_thread(resume_session)
-                if old_id:
-                    config["configurable"]["thread_id"] = old_id
-                    print(f"已恢复会话: {old_id[:8]}...")
+            if command == "/resume":
+                restored_id = await asyncio.to_thread(
+                    resume_session,
+                    local_store,
+                    profile_id,
+                )
+                if restored_id:
+                    session_id = restored_id
+                    print(f"已恢复会话: {restored_id[:8]}...")
+                continue
+            if not query.strip():
                 continue
 
-            print("\n🤖 Agent: ", end="", flush=True)
-            reasoning_started = False
-            content_started = False
-
-            async for event in agent.astream_events(
-                {"messages": [{"role": "user", "content": query}]},
-                config=config,
-                version="v2",
-            ):
-                kind = event["event"]
-
-                if kind == "on_tool_start" and event["data"]["input"]:
-                    print(f"\n🔧 正在调用工具：{event['name']} ...\n")
-
-                elif kind == "on_chat_model_stream":
-                    chunk = event["data"]["chunk"]
-
-                    # reasoning_content（thinking 模式输出）
-                    reasoning = chunk.additional_kwargs.get("reasoning_content")
-                    if reasoning:
-                        if not reasoning_started:
-                            print("\n💭 思考过程：\n", flush=True)
-                            reasoning_started = True
-                        print(reasoning, end="", flush=True)
-
-                    # 正式回答内容
-                    if chunk.content:
-                        if reasoning_started and not content_started:
-                            print("\n\n" + "=" * 40 + "\n", flush=True)
-                            content_started = True
-                        elif not content_started:
-                            content_started = True
-                        print(chunk.content, end="", flush=True)
-
-            print("\n" + "-" * 30)
-
+            await asyncio.to_thread(
+                local_store.upsert_conversation,
+                profile_id,
+                session_id,
+                query,
+            )
+            context = await asyncio.to_thread(
+                create_agent_context,
+                local_store=local_store,
+                profile_id=profile_id,
+                thread_id=session_id,
+            )
+            config = {"configurable": {"thread_id": session_id}}
+            try:
+                await stream_answer(agent, config, context, query)
+            except Exception as exc:
+                print(f"\n请求失败：{exc}")
     finally:
         await pool.close()
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    if sys.platform == "win32":
+        asyncio.run(main(), loop_factory=asyncio.SelectorEventLoop)
+    else:
+        asyncio.run(main())

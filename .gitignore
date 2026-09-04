@@ -4,11 +4,22 @@ __pycache__/
 .pytest_cache/
 .idea/
 *.log
-session_id.json
 sessions/
 output/
+var/
 .coverage
 htmlcov/
 *.egg-info/
 dist/
 build/
+
+# Local project instructions and non-release documents
+*.md
+!README.md
+!frontend/README.md
+
+# Local source datasets and generated reports
+src/pipeline/entities/
+src/pipeline/relationships/
+data_update_plan.json
+*_results.json
